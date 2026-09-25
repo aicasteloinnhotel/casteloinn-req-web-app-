@@ -1,0 +1,23 @@
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+# Versão do Node fixa: sem isto o build usa a padrão do Netlify, que muda
+# com o tempo, e um deploy que funcionava pode quebrar sozinho.
+[build.environment]
+  NODE_VERSION = "22"
+
+# Rotas do app (React Router): qualquer endereço abre o index.html.
+# Arquivos que existem de verdade (sw.js, manifest, ícones) são servidos antes.
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
+# Os arquivos de /assets têm o conteúdo no nome (index-hFLi_5hH.js): mudou o
+# conteúdo, muda o nome. Podem ficar guardados no celular sem risco, e o app
+# abre mais rápido. O index.html e o sw.js continuam sempre conferidos.
+[[headers]]
+  for = "/assets/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
