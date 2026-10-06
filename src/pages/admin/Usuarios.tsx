@@ -378,7 +378,7 @@ export default function Usuarios() {
                   const bloqueio = motivoDeBloqueio(u);
                   return (
                     <TableRow key={u.id}>
-                      <TableCell className="font-medium text-slate-800 whitespace-normal break-words">
+                      <TableCell className="font-medium text-slate-800 whitespace-normal [overflow-wrap:anywhere]!">
                         {u.nome}
                         {ehEuMesmo(u) && (
                           <span className="ml-2 text-[10px] font-bold uppercase text-teal-700 bg-teal-50 border border-teal-200 px-1.5 py-0.5 rounded">
@@ -393,7 +393,7 @@ export default function Usuarios() {
                           {!u.ativo && <span className="text-red-600 font-semibold"> · Inativo</span>}
                         </div>
                       </TableCell>
-                      <TableCell className="text-slate-600 hidden sm:table-cell whitespace-normal break-words">
+                      <TableCell className="text-slate-600 hidden sm:table-cell whitespace-normal [overflow-wrap:anywhere]!">
                         {u.departamento}
                       </TableCell>
                       <TableCell className="hidden sm:table-cell">

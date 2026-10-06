@@ -439,8 +439,11 @@ export default function NovaRequisicao() {
                       </DialogContent>
                     </Dialog>
                   </div>
+                  {/* Lista no fluxo normal da tela, e não flutuando: o cartão
+                      corta o que passa da borda dele, e o último resultado
+                      ficava pela metade. Assim ela empurra o resto para baixo. */}
                   {(buscaItem.length > 0) && (
-                    <div className="absolute z-10 w-full border border-teal-200 shadow-xl shadow-teal-900/10 rounded-lg max-h-56 overflow-y-auto bg-white mt-1 divide-y divide-slate-100 overflow-hidden ring-1 ring-slate-900/5 top-12 left-0 right-0">
+                    <div className="w-full border border-teal-200 shadow-lg shadow-teal-900/10 rounded-lg max-h-72 overflow-y-auto overscroll-contain bg-white divide-y divide-slate-100 ring-1 ring-slate-900/5">
                       {itensFiltrados.map((i) => (
                         <div
                           key={i.id}

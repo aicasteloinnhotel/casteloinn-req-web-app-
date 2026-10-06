@@ -50,7 +50,9 @@ export const RequisicaoCard = React.memo(({ req }: { req: Requisicao }) => {
           minúsculo acima de cada valor ("Requisição", "Departamento",
           "Solicitante", "Itens", "Criada em"), o que deixava o cartão com
           223px de altura e mais rótulo do que informação. */}
-      <CardContent className="md:hidden p-4">
+      {/* Compacto até 1024px. As colunas do computador precisam de ~780px:
+          em tablet (768px) a status e a seta ficavam cortadas na borda. */}
+      <CardContent className="lg:hidden p-4">
         <div className="flex items-start justify-between gap-2 mb-1">
           <span className="font-black text-base text-slate-800 leading-none">
             #{req.codigo_requisicao}
@@ -83,7 +85,7 @@ export const RequisicaoCard = React.memo(({ req }: { req: Requisicao }) => {
       </CardContent>
 
       {/* COMPUTADOR: colunas, que é onde elas cabem de verdade. */}
-      <CardContent className="hidden md:flex p-5 flex-row items-center justify-between gap-4">
+      <CardContent className="hidden lg:flex p-5 flex-row items-center justify-between gap-4">
         <div className="flex flex-row items-center gap-6 flex-1 min-w-0">
           <div className="min-w-[5rem] shrink-0">
             <p className="text-xs text-slate-600 font-medium mb-1">Requisição</p>

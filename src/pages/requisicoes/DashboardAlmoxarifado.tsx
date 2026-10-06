@@ -267,8 +267,10 @@ export default function DashboardAlmoxarifado({
   
   const totalPendentesCount = reqs.filter((r) => r.status === "PENDENTE" || r.status === "SEPARANDO").length;
 
+  // Tela alta: o painel cabe inteiro. Tela baixa (notebook 1366×768,
+  // 1024×768): rola um pouco, em vez de espremer os cartões de baixo.
   return (
-    <div className="flex flex-col h-auto lg:h-full w-full gap-4 bg-slate-50 overflow-y-auto lg:overflow-hidden animate-in fade-in lg:pb-0 pb-4">
+    <div className="flex flex-col h-auto lg:h-full w-full gap-4 bg-slate-50 overflow-y-auto animate-in fade-in lg:pb-0 pb-4">
 
       {/* Pausa para inventário. Ligada, quem libera é a faixa do topo. */}
       {!bloqueio.ativo && (
@@ -337,14 +339,14 @@ export default function DashboardAlmoxarifado({
       </Card>
 
       {/* BOTTOM AREA - 3 COLUMNS */}
-      <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-4 min-h-0">
+      <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-4 min-h-0 lg:min-h-[400px]">
         
         {/* COLUNA 1: reposicao */}
         <div className="lg:col-span-3 flex flex-col gap-4 min-h-0 h-full">
           
           {/* Card 1: Top Solicitantes */}
           <Card 
-            className="flex-shrink-0 cursor-pointer hover:shadow-md transition-all border-slate-200 group"
+            className="flex-shrink-0 gap-0! cursor-pointer hover:shadow-md transition-all border-slate-200 group"
             onClick={() => navigate("/admin/usuarios")}
           >
             <CardHeader className="p-3 pb-1 flex flex-row items-center justify-between">
@@ -364,9 +366,12 @@ export default function DashboardAlmoxarifado({
                       </span>
                       {/* O agrupamento é por pessoa; antes exibia só o setor, o
                           que fazia o mesmo departamento aparecer repetido. */}
-                      <span className="text-sm font-semibold text-slate-700 break-words leading-snug" title={`${s.nome} — ${s.dep}`}>
-                        {s.nome}
-                        <span className="text-xs font-normal text-slate-500 ml-1">({s.dep})</span>
+                      {/* Uma linha só, nome completo no title. Quebrando linha,
+                          em notebook (1280×720, 1024×768) este cartão crescia e
+                          espremia o "Aguardando Reposição" até sumir o conteúdo. */}
+                      <span className="min-w-0 truncate text-sm font-semibold text-slate-700 leading-snug" title={`${s.nome} — ${s.dep}`}>
+                        {s.nome}{" "}
+                        <span className="text-xs font-normal text-slate-500">({s.dep})</span>
                       </span>
                     </div>
                     <span className="text-sm font-bold text-teal-700 shrink-0">{s.count}</span>
@@ -380,7 +385,7 @@ export default function DashboardAlmoxarifado({
 
           {/* Card 2 & 3 Merged: Aguardando Reposição e Lista de Reposição */}
           <Card 
-            className="flex-1 flex flex-col min-h-0 cursor-pointer hover:shadow-md transition-all border-slate-200 group"
+            className="flex-1 flex flex-col gap-0! min-h-0 lg:min-h-[180px] cursor-pointer hover:shadow-md transition-all border-slate-200 group"
             onClick={() => navigate("/reposicao")}
           >
             <CardHeader className="p-3 pb-2 border-b border-slate-100 flex flex-row items-center justify-between bg-white">

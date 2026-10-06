@@ -988,8 +988,8 @@ export default function ListaReposicao() {
 
       {/* MODAL HISTÓRICO DE BAIXAS */}
       <Dialog open={showHistoryModal} onOpenChange={setShowHistoryModal}>
-        <DialogContent className="sm:max-w-2xl bg-white border-slate-200 shadow-2xl rounded-2xl p-0 overflow-hidden">
-          <div className="bg-slate-50 p-6 border-b border-slate-100 flex flex-col items-center text-center">
+        <DialogContent className="sm:max-w-2xl bg-white border-slate-200 shadow-2xl rounded-2xl p-0 overflow-hidden flex flex-col gap-0">
+          <div className="shrink-0 bg-slate-50 p-5 sm:p-6 border-b border-slate-100 flex flex-col items-center text-center">
             <div className="w-12 h-12 bg-white rounded-xl shadow-md border border-slate-200 flex items-center justify-center mb-3">
               <History className="w-6 h-6 text-teal-700" />
             </div>
@@ -1001,7 +1001,8 @@ export default function ListaReposicao() {
             </DialogDescription>
           </div>
 
-          <div className="p-6 max-h-[60vh] overflow-y-auto space-y-3">
+          {/* A lista fica com o espaço que sobra entre cabeçalho e rodapé. */}
+          <div className="p-4 sm:p-6 flex-1 min-h-0 overflow-y-auto space-y-3">
             {historicoItems.length === 0 ? (
               <div className="text-center py-12 text-slate-500 text-sm bg-slate-50/50 rounded-xl border border-dashed border-slate-200">
                 Nenhum item com baixa registrada no histórico recente.
@@ -1034,7 +1035,10 @@ export default function ListaReposicao() {
               ))
             )}
           </div>
-          <DialogFooter className="bg-slate-50 p-4 border-t border-slate-100 flex justify-end">
+          {/* mx-0/mb-0: o rodapé padrão tem margem negativa pensada para
+              janela com espaçamento interno; aqui o espaçamento é zero e ele
+              vazava 16px para fora (cortado). */}
+          <DialogFooter className="shrink-0 mx-0 mb-0 bg-slate-50 p-4 border-t border-slate-100 flex justify-end">
             <Button variant="outline" onClick={() => setShowHistoryModal(false)}>
               Fechar
             </Button>
@@ -1216,7 +1220,7 @@ export default function ListaReposicao() {
                   />
                 </div>
                 {(buscaItem || itensFiltrados.length <= 5) && (
-                  <div className="border border-slate-200/80 shadow-md shadow-slate-200/50 rounded-xl max-h-48 overflow-y-auto bg-white shadow-lg absolute w-full z-10 mt-1">
+                  <div className="border border-slate-200/80 shadow-md shadow-slate-200/50 rounded-xl max-h-60 overflow-y-auto overscroll-contain bg-white w-full">
                     {itensFiltrados.length > 0 ? (
                       itensFiltrados.map((i) => (
                         <button

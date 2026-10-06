@@ -791,10 +791,10 @@ export default function Separacao() {
           <button
             type="button"
             onClick={irParaPrimeiroPendente}
-            className="w-full mb-2 text-xs font-bold text-amber-800 bg-amber-50 border border-amber-200 rounded-lg py-1.5 px-3 hover:bg-amber-100 transition-colors flex items-center justify-center gap-1.5"
+            className="w-full mb-2 text-xs font-bold text-amber-800 bg-amber-50 border border-amber-200 rounded-lg py-1.5 px-3 hover:bg-amber-100 transition-colors flex flex-wrap items-center justify-center gap-x-1.5 text-center"
           >
-            Faltam {totalItems - checkedItems.size} de {totalItems} para conferir
-            {totalPages > 1 && <span className="font-medium opacity-80">— tocar para ir até o próximo</span>}
+            <span>Faltam {totalItems - checkedItems.size} de {totalItems} para conferir</span>
+            {totalPages > 1 && <span className="font-medium opacity-80">— toque para ir ao próximo</span>}
           </button>
         )}
         <div className="flex flex-row gap-2 sm:gap-3">
@@ -822,7 +822,7 @@ export default function Separacao() {
 
       {/* Dialog Conferência e Assinatura */}
       <Dialog open={showSignatureModal} onOpenChange={setShowSignatureModal}>
-        <DialogContent className="p-0 overflow-hidden flex flex-col bg-slate-50 w-full h-[100dvh] max-w-full sm:max-w-3xl sm:h-[90vh] sm:max-h-[95vh] sm:rounded-xl sm:w-11/12 border-0">
+        <DialogContent className="p-0 overflow-hidden flex flex-col bg-slate-50 w-full h-[100dvh] max-h-[100dvh] max-w-full sm:max-w-3xl sm:h-[90vh] sm:max-h-[95vh] sm:rounded-xl sm:w-11/12 border-0">
           <DialogHeader className="p-4 landscape:p-2 landscape:py-2 border-b bg-white shrink-0">
             <DialogTitle className="text-xl landscape:text-lg font-bold text-teal-900">
               {signatureStep === 1 && "1. Conferência dos Itens"}

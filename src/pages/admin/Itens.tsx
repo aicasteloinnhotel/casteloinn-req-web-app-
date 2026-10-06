@@ -572,7 +572,7 @@ export default function Itens() {
                           {idx + 1}
                         </span>
                       </TableCell>
-                      <TableCell className="font-semibold text-slate-700 whitespace-normal break-words">
+                      <TableCell className="font-semibold text-slate-700 whitespace-normal [overflow-wrap:anywhere]!">
                         {item.nome}
                       </TableCell>
                       <TableCell className="text-right">
@@ -712,7 +712,10 @@ export default function Itens() {
                   ) : (
                     itensOrdenados.map((i) => (
                       <TableRow key={i.id}>
-                        <TableCell className="font-medium text-slate-800 whitespace-normal break-words">
+                        {/* Quebra em qualquer ponto: "SHAMPOO/CONDICIONADOR"
+                            não tem espaço e alargava a tabela no celular. O "!"
+                            vence o break-words que a TableCell já traz. */}
+                        <TableCell className="font-medium text-slate-800 whitespace-normal [overflow-wrap:anywhere]!">
                           {i.nome}
                         </TableCell>
                         <TableCell className="text-slate-600 font-medium text-xs sm:text-sm">
