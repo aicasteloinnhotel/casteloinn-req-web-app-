@@ -19,30 +19,34 @@ FROM (
 
     SELECT 1 AS ordem,
            'Tabelas do app'::text AS verificacao,
-           count(*)::text || ' de 6' AS resultado,
-           CASE WHEN count(*) = 6 THEN 'OK' ELSE 'FALHOU' END AS situacao
+           count(*)::text || ' de 7' AS resultado,
+           CASE WHEN count(*) = 7 THEN 'OK' ELSE 'FALHOU' END AS situacao
       FROM pg_tables
      WHERE schemaname = 'public'
-       AND tablename IN ('usuarios','itens','requisicoes','requisicao_itens','reposicao_itens','historico')
+       AND tablename IN ('usuarios','itens','requisicoes','requisicao_itens','reposicao_itens','historico',
+                         'bloqueio_requisicoes')
 
     UNION ALL
-    SELECT 2, 'Colunas dos ajustes 02 e 03',
-           count(*)::text || ' de 7',
-           CASE WHEN count(*) = 7 THEN 'OK' ELSE 'FALHOU' END
+    SELECT 2, 'Colunas dos ajustes 02, 03 e 04',
+           count(*)::text || ' de 9',
+           CASE WHEN count(*) = 9 THEN 'OK' ELSE 'FALHOU' END
       FROM information_schema.columns
      WHERE table_schema = 'public'
        AND (table_name::text, column_name::text) IN (
              ('requisicoes','lancado'), ('requisicoes','lancado_em'), ('requisicoes','lancado_por'),
              ('requisicoes','termo_aceito_em'), ('requisicoes','termo_versao'),
-             ('requisicao_itens','unidade'), ('reposicao_itens','unidade'))
+             ('requisicao_itens','unidade'), ('reposicao_itens','unidade'),
+             ('itens','unidades'), ('requisicao_itens','unidade_separada'))
 
     UNION ALL
     SELECT 3, 'Funções do banco',
-           count(*)::text || ' de 4',
-           CASE WHEN count(*) = 4 THEN 'OK' ELSE 'FALHOU' END
+           count(*)::text || ' de 7',
+           CASE WHEN count(*) = 7 THEN 'OK' ELSE 'FALHOU' END
       FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
      WHERE n.nspname = 'public'
-       AND p.proname IN ('login_usuario','processar_ruptura','hash_senha_usuario','garantir_almoxarifado_ativo')
+       AND p.proname IN ('login_usuario','processar_ruptura','hash_senha_usuario','garantir_almoxarifado_ativo',
+                         'normalizar_unidades_item','barrar_requisicao_durante_bloqueio',
+                         'definir_bloqueio_requisicoes')
 
     UNION ALL
     SELECT 4, 'Ruptura grava a unidade do pedido',
@@ -52,21 +56,22 @@ FROM (
                 THEN 'OK' ELSE 'FALHOU' END
 
     UNION ALL
-    SELECT 5, 'Gatilhos (hash da senha e proteção do admin)',
-           count(*)::text || ' de 2',
-           CASE WHEN count(*) = 2 THEN 'OK' ELSE 'FALHOU' END
+    SELECT 5, 'Gatilhos (senha, admin, unidades, pausa)',
+           count(*)::text || ' de 4',
+           CASE WHEN count(*) = 4 THEN 'OK' ELSE 'FALHOU' END
       FROM pg_trigger
-     WHERE tgrelid = 'public.usuarios'::regclass
-       AND tgname IN ('trg_hash_senha','trg_garantir_almoxarifado')
+     WHERE tgname IN ('trg_hash_senha','trg_garantir_almoxarifado',
+                      'trg_itens_unidades','trg_bloqueio_requisicoes')
        AND NOT tgisinternal
 
     UNION ALL
     SELECT 6, 'RLS ligado',
-           count(*)::text || ' de 6',
-           CASE WHEN count(*) = 6 THEN 'OK' ELSE 'FALHOU' END
+           count(*)::text || ' de 7',
+           CASE WHEN count(*) = 7 THEN 'OK' ELSE 'FALHOU' END
       FROM pg_tables
      WHERE schemaname = 'public' AND rowsecurity
-       AND tablename IN ('usuarios','itens','requisicoes','requisicao_itens','reposicao_itens','historico')
+       AND tablename IN ('usuarios','itens','requisicoes','requisicao_itens','reposicao_itens','historico',
+                         'bloqueio_requisicoes')
 
     UNION ALL
     SELECT 7, 'Coluna senha protegida da API',
@@ -102,11 +107,12 @@ FROM (
 
     UNION ALL
     SELECT 10, 'Realtime (telas atualizam sozinhas)',
-           count(*)::text || ' de 4 tabelas',
-           CASE WHEN count(*) = 4 THEN 'OK' ELSE 'ATENCAO' END
+           count(*)::text || ' de 5 tabelas',
+           CASE WHEN count(*) = 5 THEN 'OK' ELSE 'ATENCAO' END
       FROM pg_publication_tables
      WHERE pubname = 'supabase_realtime' AND schemaname = 'public'
-       AND tablename IN ('requisicoes','requisicao_itens','reposicao_itens','historico')
+       AND tablename IN ('requisicoes','requisicao_itens','reposicao_itens','historico',
+                         'bloqueio_requisicoes')
 
     UNION ALL
     SELECT 11, 'Bucket de assinaturas',
@@ -150,7 +156,16 @@ FROM (
        AND created_at < now() - interval '7 days'
 
     UNION ALL
-    SELECT 16, 'Próxima requisição',
+    SELECT 16, 'Novas requisições',
+           coalesce((SELECT CASE WHEN ativo
+                                 THEN 'SUSPENSAS desde ' || to_char(alterado_em AT TIME ZONE 'America/Sao_Paulo', 'DD/MM HH24:MI')
+                                 ELSE 'liberadas' END
+                       FROM public.bloqueio_requisicoes WHERE id = 1), 'sem a pausa (rode o AJUSTE_04)'),
+           CASE WHEN EXISTS (SELECT 1 FROM public.bloqueio_requisicoes WHERE id = 1 AND ativo)
+                THEN 'ATENCAO' ELSE 'OK' END
+
+    UNION ALL
+    SELECT 17, 'Próxima requisição',
            'REQ #' || (CASE WHEN is_called THEN last_value + 1 ELSE last_value END)::text,
            'INFO'
       FROM public.requisicoes_codigo_requisicao_seq

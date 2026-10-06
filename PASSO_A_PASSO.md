@@ -1,5 +1,34 @@
 # Passo a passo do lançamento
 
+## ★ Atualizar para uma versão nova (o app já está em uso)
+
+Os dados ficam no Supabase. Trocar os arquivos do app **não** mexe neles.
+
+1. **Banco, se a versão trouxer um `AJUSTE_NN`.** Rode no SQL Editor *antes*
+   do passo 2. Os ajustes só acrescentam e não apagam nada. Na 1.1 é o
+   `AJUSTE_04_UNIDADES_E_PAUSA_INVENTARIO.sql`. **Nunca** rode o
+   `BANCO_DEFINITIVO.sql` nem o `ZERAR_MOVIMENTACAO.sql` num banco em uso.
+2. **GitHub, no mesmo repositório.** *Add file → Upload files* → arraste os
+   arquivos → *Commit changes*. Arquivo com o mesmo nome é substituído. **O
+   site do GitHub aceita no máximo 100 arquivos por envio**, e o projeto tem
+   mais. Por isso são dois envios: primeiro tudo menos a pasta `src`, depois a
+   pasta `src`. A pasta de entrega de cada versão já vem dividida assim.
+3. **Netlify.** Ele percebe cada commit e publica sozinho, **no mesmo link**,
+   sem criar site nem deploy novo. Acompanhe em *Deploys* até aparecer
+   **Published**. Para conferir, abra *Ajuda e Sobre → Sobre*, que deve
+   mostrar a versão nova e a data de hoje.
+4. **Celulares.** Ninguém reinstala nada. Quem abrir o app já pega a versão
+   nova. Quem estava com ele aberto vê "Saiu uma versão nova do app →
+   Atualizar" (a partir da 1.1).
+5. **Deu problema?** Vá em Netlify → *Deploys*, clique na publicação anterior
+   e depois em **Publish deploy**. Volta na hora. Os ajustes de banco só
+   acrescentam, então a versão anterior continua funcionando com eles.
+
+Versão 1.1: o roteiro completo, para leigos, está em
+`Documentos\ATUALIZACAO_APP_v1.1\LEIA-ME - PASSO A PASSO.txt`.
+
+---
+
 Sequência na ordem em que você trabalha. Os passos 2 e 5 são os que não podem
 ficar de fora: o login novo mora **dentro** do banco, e as assinaturas dependem
 do Storage.

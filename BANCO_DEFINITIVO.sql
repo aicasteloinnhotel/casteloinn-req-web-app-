@@ -1,3 +1,9 @@
+-- ##################################################################################
+-- ⛔  NÃO RODE ESTE SCRIPT NO BANCO QUE ESTÁ EM USO. ELE APAGA TUDO.
+-- ⛔  Serve só para GUARDAR: montar um projeto Supabase NOVO, do zero.
+-- ⛔  Para atualizar o banco em uso, rode apenas o AJUSTE que a versão pedir.
+-- ##################################################################################
+
 -- =================================================================================
 --  BANCO DEFINITIVO — Sistema de Requisições / Almoxarifado  •  Castelo Inn
 -- =================================================================================
@@ -45,13 +51,15 @@ BEGIN
           JOIN pg_namespace n ON n.oid = p.pronamespace
          WHERE n.nspname = 'public'
            AND p.proname IN ('processar_ruptura', 'login_usuario', 'hash_senha_usuario',
-                             'garantir_almoxarifado_ativo')
+                             'garantir_almoxarifado_ativo', 'normalizar_unidades_item',
+                             'barrar_requisicao_durante_bloqueio', 'definir_bloqueio_requisicoes')
     LOOP
         EXECUTE format('DROP FUNCTION IF EXISTS %s CASCADE', r.assinatura);
     END LOOP;
 END
 $limpeza$;
 
+DROP TABLE IF EXISTS public.bloqueio_requisicoes CASCADE;
 DROP TABLE IF EXISTS public.historico        CASCADE;
 DROP TABLE IF EXISTS public.reposicao_itens  CASCADE;
 DROP TABLE IF EXISTS public.requisicao_itens CASCADE;
@@ -85,7 +93,10 @@ CREATE UNIQUE INDEX usuarios_nome_unico ON public.usuarios (lower(trim(nome)));
 CREATE TABLE public.itens (
     id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     nome       TEXT NOT NULL,
+    -- Unidade principal. Sempre igual a unidades[1] (garantido por gatilho).
     unidade    TEXT NOT NULL DEFAULT 'UN',
+    -- Unidades em que o material pode ser pedido (ex.: carne = UN e KG).
+    unidades   TEXT[] NOT NULL DEFAULT '{}',
     ativo      BOOLEAN NOT NULL DEFAULT true,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -147,6 +158,9 @@ CREATE TABLE public.requisicao_itens (
     -- Unidade escolhida no pedido (UN, CX, L...). NULL = usar a unidade
     -- cadastrada no catálogo do item.
     unidade             TEXT,
+    -- Unidade em que o almoxarifado ENTREGOU (pedido 5 UN, entregue 6,2 KG).
+    -- NULL = entregue na mesma unidade do pedido.
+    unidade_separada    TEXT,
     created_at          TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
@@ -182,6 +196,19 @@ CREATE TABLE public.historico (
     observacao    TEXT,
     created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+
+-- 3.7 PAUSA PARA INVENTÁRIO ------------------------------------------------------
+-- Uma linha só (id = 1). Ligada, o banco recusa requisição nova (ver 5.3).
+CREATE TABLE public.bloqueio_requisicoes (
+    id           SMALLINT PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+    ativo        BOOLEAN NOT NULL DEFAULT false,
+    motivo       TEXT,
+    alterado_por UUID REFERENCES public.usuarios(id) ON DELETE SET NULL,
+    alterado_em  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+INSERT INTO public.bloqueio_requisicoes (id, ativo) VALUES (1, false);
 
 
 -- ---------------------------------------------------------------------------------
@@ -284,6 +311,74 @@ CREATE TRIGGER trg_garantir_almoxarifado
     FOR EACH ROW EXECUTE FUNCTION public.garantir_almoxarifado_ativo();
 
 
+-- 5.2 UNIDADES DO ITEM SEMPRE COERENTES
+-- Maiúsculas, sem repetição, e a principal ("unidade") sempre na frente da lista.
+CREATE OR REPLACE FUNCTION public.normalizar_unidades_item()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SET search_path = public
+AS $fn_unidades$
+DECLARE
+    v_lista     TEXT[] := '{}';
+    v_u         TEXT;
+    v_principal TEXT;
+BEGIN
+    FOREACH v_u IN ARRAY coalesce(NEW.unidades, '{}'::text[])
+    LOOP
+        v_u := upper(trim(coalesce(v_u, '')));
+        IF v_u <> '' AND NOT (v_u = ANY (v_lista)) THEN
+            v_lista := v_lista || v_u;
+        END IF;
+    END LOOP;
+
+    v_principal := upper(trim(coalesce(NEW.unidade, '')));
+    IF v_principal = '' THEN
+        v_principal := coalesce(v_lista[1], 'UN');
+    END IF;
+
+    NEW.unidade  := v_principal;
+    NEW.unidades := array_prepend(v_principal, array_remove(v_lista, v_principal));
+    RETURN NEW;
+END;
+$fn_unidades$;
+
+CREATE TRIGGER trg_itens_unidades
+    BEFORE INSERT OR UPDATE OF unidade, unidades ON public.itens
+    FOR EACH ROW EXECUTE FUNCTION public.normalizar_unidades_item();
+
+
+-- 5.3 PAUSA PARA INVENTÁRIO
+-- Com a pausa ligada, recusa requisição NOVA (PENDENTE). A complementar da
+-- ruptura nasce AGUARDANDO e continua sendo criada.
+CREATE OR REPLACE FUNCTION public.barrar_requisicao_durante_bloqueio()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $fn_bloqueio$
+DECLARE
+    v_motivo TEXT;
+BEGIN
+    IF NEW.status = 'PENDENTE' THEN
+        SELECT coalesce(nullif(trim(motivo), ''), 'inventário em andamento')
+          INTO v_motivo
+          FROM public.bloqueio_requisicoes
+         WHERE id = 1 AND ativo;
+
+        IF FOUND THEN
+            RAISE EXCEPTION 'Novas requisições estão suspensas no momento (%). Tente novamente mais tarde.', v_motivo
+                USING ERRCODE = 'P0001';
+        END IF;
+    END IF;
+    RETURN NEW;
+END;
+$fn_bloqueio$;
+
+CREATE TRIGGER trg_bloqueio_requisicoes
+    BEFORE INSERT ON public.requisicoes
+    FOR EACH ROW EXECUTE FUNCTION public.barrar_requisicao_durante_bloqueio();
+
+
 -- ---------------------------------------------------------------------------------
 --  6. LOGIN
 -- ---------------------------------------------------------------------------------
@@ -359,6 +454,7 @@ DECLARE
     v_item_id UUID;
     v_qtd     NUMERIC;
     v_unid    TEXT;
+    v_rep_id  UUID;
     v_total   INT := 0;
 BEGIN
     SELECT * INTO v_origem FROM public.requisicoes WHERE id = p_requisicao_origem_id;
@@ -373,47 +469,77 @@ BEGIN
            locked_at = NULL
      WHERE id = p_requisicao_origem_id;
 
-    -- 2. Sem itens em falta não há complementar a criar.
-    IF p_itens IS NULL OR jsonb_array_length(p_itens) = 0 THEN
-        RETURN NULL;
+    -- 2. Cria a complementar (só se houver item em falta válido; senão é
+    --    desfeita no passo 4).
+    IF p_itens IS NOT NULL AND jsonb_array_length(p_itens) > 0 THEN
+        INSERT INTO public.requisicoes
+            (requisicao_origem_id, usuario_id, departamento, status, observacao)
+        VALUES (
+            p_requisicao_origem_id,
+            v_origem.usuario_id,
+            v_origem.departamento,
+            'AGUARDANDO',
+            'Complementar gerada automaticamente por ruptura da REQ #'
+                || coalesce(v_origem.codigo_requisicao::text, '?')
+        )
+        RETURNING id INTO v_nova_id;
+
+        -- 3. Cada falta: linha na complementar + lugar na lista de reposição,
+        --    na unidade em que foi pedida.
+        FOR v_item IN SELECT * FROM jsonb_array_elements(p_itens)
+        LOOP
+            v_item_id := nullif(v_item->>'item_id', '')::uuid;
+            v_qtd     := coalesce((v_item->>'quantidade')::numeric, 0);
+            v_unid    := nullif(upper(trim(coalesce(v_item->>'unidade', ''))), '');
+
+            CONTINUE WHEN v_item_id IS NULL OR v_qtd <= 0;
+
+            INSERT INTO public.requisicao_itens (requisicao_id, item_id, quantidade, unidade)
+            VALUES (v_nova_id, v_item_id, v_qtd, v_unid);
+
+            -- A origem já era complementar e o material já estava na lista de
+            -- reposição? Então a mesma linha passa para a nova complementar.
+            SELECT id INTO v_rep_id
+              FROM public.reposicao_itens
+             WHERE requisicao_id = p_requisicao_origem_id
+               AND item_id = v_item_id
+               AND NOT resolvido
+               AND (unidade IS NOT DISTINCT FROM v_unid OR unidade IS NULL OR v_unid IS NULL)
+             ORDER BY (unidade IS NOT DISTINCT FROM v_unid) DESC, created_at
+             LIMIT 1;
+
+            IF v_rep_id IS NOT NULL THEN
+                UPDATE public.reposicao_itens
+                   SET requisicao_id = v_nova_id,
+                       quantidade    = v_qtd,
+                       unidade       = coalesce(v_unid, unidade)
+                 WHERE id = v_rep_id;
+            ELSE
+                INSERT INTO public.reposicao_itens
+                    (item_id, quantidade, tipo_origem, requisicao_id, resolvido, unidade)
+                VALUES (v_item_id, v_qtd, 'RUPTURA', v_nova_id, false, v_unid);
+            END IF;
+
+            v_total := v_total + 1;
+        END LOOP;
+
+        -- 4. Nenhum item válido: desfaz a complementar vazia.
+        IF v_total = 0 THEN
+            DELETE FROM public.requisicoes WHERE id = v_nova_id;
+            v_nova_id := NULL;
+        END IF;
     END IF;
 
-    -- 3. Cria a requisição complementar, que nasce AGUARDANDO reposição.
-    INSERT INTO public.requisicoes
-        (requisicao_origem_id, usuario_id, departamento, status, observacao)
-    VALUES (
-        p_requisicao_origem_id,
-        v_origem.usuario_id,
-        v_origem.departamento,
-        'AGUARDANDO',
-        'Complementar gerada automaticamente por ruptura da REQ #'
-            || coalesce(v_origem.codigo_requisicao::text, '?')
-    )
-    RETURNING id INTO v_nova_id;
+    -- 5. A origem fechou: o que ainda estava pendente dela na lista de
+    --    reposição foi entregue agora (a tela já deu baixa com o nome de quem
+    --    entregou). Sobra nenhuma linha presa a uma requisição encerrada.
+    UPDATE public.reposicao_itens
+       SET resolvido    = true,
+           resolvido_em = coalesce(resolvido_em, now())
+     WHERE requisicao_id = p_requisicao_origem_id
+       AND NOT resolvido;
 
-    -- 4. Itens faltantes na complementar + entrada na lista de reposição,
-    --    os dois com a unidade em que o material foi pedido (10 UN, 2 CX...).
-    FOR v_item IN SELECT * FROM jsonb_array_elements(p_itens)
-    LOOP
-        v_item_id := nullif(v_item->>'item_id', '')::uuid;
-        v_qtd     := coalesce((v_item->>'quantidade')::numeric, 0);
-        v_unid    := nullif(upper(trim(coalesce(v_item->>'unidade', ''))), '');
-
-        CONTINUE WHEN v_item_id IS NULL OR v_qtd <= 0;
-
-        INSERT INTO public.requisicao_itens (requisicao_id, item_id, quantidade, unidade)
-        VALUES (v_nova_id, v_item_id, v_qtd, v_unid);
-
-        INSERT INTO public.reposicao_itens
-            (item_id, quantidade, tipo_origem, requisicao_id, resolvido, unidade)
-        VALUES (v_item_id, v_qtd, 'RUPTURA', v_nova_id, false, v_unid);
-
-        v_total := v_total + 1;
-    END LOOP;
-
-    -- 5. Nenhum item válido: desfaz a complementar vazia.
-    IF v_total = 0 THEN
-        DELETE FROM public.requisicoes WHERE id = v_nova_id;
+    IF v_nova_id IS NULL THEN
         RETURN NULL;
     END IF;
 
@@ -451,6 +577,7 @@ ALTER TABLE public.requisicoes      ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.requisicao_itens ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.reposicao_itens  ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.historico        ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.bloqueio_requisicoes ENABLE ROW LEVEL SECURITY;
 
 -- 8.1 usuarios: leitura só das colunas seguras — "senha" fica de fora.
 REVOKE ALL ON public.usuarios FROM anon, authenticated;
@@ -480,6 +607,42 @@ CREATE POLICY requisicoes_all      ON public.requisicoes      FOR ALL TO anon, a
 CREATE POLICY requisicao_itens_all ON public.requisicao_itens FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
 CREATE POLICY reposicao_itens_all  ON public.reposicao_itens  FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
 CREATE POLICY historico_all        ON public.historico        FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
+
+-- Pausa para inventário: a API só LÊ. Ligar/desligar é pela função
+-- definir_bloqueio_requisicoes, que confere se quem pede é do Almoxarifado.
+REVOKE ALL ON public.bloqueio_requisicoes FROM anon, authenticated;
+GRANT SELECT ON public.bloqueio_requisicoes TO anon, authenticated;
+CREATE POLICY bloqueio_select ON public.bloqueio_requisicoes FOR SELECT TO anon, authenticated USING (true);
+
+CREATE OR REPLACE FUNCTION public.definir_bloqueio_requisicoes(
+    p_usuario_id UUID,
+    p_ativo      BOOLEAN,
+    p_motivo     TEXT DEFAULT NULL
+)
+RETURNS VOID
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $fn_definir_bloqueio$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM public.usuarios
+         WHERE id = p_usuario_id AND perfil = 'ALMOXARIFADO' AND ativo
+    ) THEN
+        RAISE EXCEPTION 'Só o Almoxarifado pode pausar ou liberar as requisições.'
+            USING ERRCODE = 'P0001';
+    END IF;
+
+    UPDATE public.bloqueio_requisicoes
+       SET ativo        = p_ativo,
+           motivo       = CASE WHEN p_ativo THEN nullif(trim(coalesce(p_motivo, '')), '') END,
+           alterado_por = p_usuario_id,
+           alterado_em  = now()
+     WHERE id = 1;
+END;
+$fn_definir_bloqueio$;
+
+GRANT EXECUTE ON FUNCTION public.definir_bloqueio_requisicoes(uuid, boolean, text) TO anon, authenticated;
 
 -- 8.3 Funções chamáveis pelo app.
 GRANT EXECUTE ON FUNCTION public.login_usuario(text, text)            TO anon, authenticated;
@@ -553,7 +716,8 @@ BEGIN
         RETURN;
     END IF;
 
-    FOREACH t IN ARRAY ARRAY['requisicoes','requisicao_itens','reposicao_itens','historico']
+    FOREACH t IN ARRAY ARRAY['requisicoes','requisicao_itens','reposicao_itens','historico',
+                             'bloqueio_requisicoes']
     LOOP
         IF NOT EXISTS (
             SELECT 1 FROM pg_publication_tables
@@ -585,19 +749,21 @@ SELECT ordem, verificacao, resultado, situacao
 FROM (
     SELECT 1 AS ordem,
            'Tabelas criadas' AS verificacao,
-           count(*)::text || ' de 6' AS resultado,
-           CASE WHEN count(*) = 6 THEN 'OK' ELSE 'FALHOU' END AS situacao
+           count(*)::text || ' de 7' AS resultado,
+           CASE WHEN count(*) = 7 THEN 'OK' ELSE 'FALHOU' END AS situacao
       FROM pg_tables
      WHERE schemaname = 'public'
-       AND tablename IN ('usuarios','itens','requisicoes','requisicao_itens','reposicao_itens','historico')
+       AND tablename IN ('usuarios','itens','requisicoes','requisicao_itens','reposicao_itens','historico',
+                         'bloqueio_requisicoes')
 
     UNION ALL
     SELECT 2, 'RLS ligado em todas',
-           count(*)::text || ' de 6',
-           CASE WHEN count(*) = 6 THEN 'OK' ELSE 'FALHOU' END
+           count(*)::text || ' de 7',
+           CASE WHEN count(*) = 7 THEN 'OK' ELSE 'FALHOU' END
       FROM pg_tables
      WHERE schemaname = 'public' AND rowsecurity = true
-       AND tablename IN ('usuarios','itens','requisicoes','requisicao_itens','reposicao_itens','historico')
+       AND tablename IN ('usuarios','itens','requisicoes','requisicao_itens','reposicao_itens','historico',
+                         'bloqueio_requisicoes')
 
     UNION ALL
     SELECT 3, 'Senha gravada com hash bcrypt',
@@ -616,12 +782,14 @@ FROM (
                 THEN 'OK' ELSE 'FALHOU' END
 
     UNION ALL
-    SELECT 5, 'Funções criadas (login, ruptura, proteção do admin)',
-           count(*)::text || ' de 3',
-           CASE WHEN count(*) = 3 THEN 'OK' ELSE 'FALHOU' END
+    SELECT 5, 'Funções criadas (login, ruptura, admin, unidades, pausa)',
+           count(*)::text || ' de 6',
+           CASE WHEN count(*) = 6 THEN 'OK' ELSE 'FALHOU' END
       FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
      WHERE n.nspname = 'public'
-       AND p.proname IN ('login_usuario','processar_ruptura','garantir_almoxarifado_ativo')
+       AND p.proname IN ('login_usuario','processar_ruptura','garantir_almoxarifado_ativo',
+                         'normalizar_unidades_item','barrar_requisicao_durante_bloqueio',
+                         'definir_bloqueio_requisicoes')
 
     UNION ALL
     SELECT 6, 'Coluna senha protegida da API',
@@ -639,11 +807,12 @@ FROM (
 
     UNION ALL
     SELECT 8, 'Realtime publicando',
-           count(*)::text || ' de 4',
-           CASE WHEN count(*) = 4 THEN 'OK' ELSE 'ATENCAO' END
+           count(*)::text || ' de 5',
+           CASE WHEN count(*) = 5 THEN 'OK' ELSE 'ATENCAO' END
       FROM pg_publication_tables
      WHERE pubname = 'supabase_realtime' AND schemaname = 'public'
-       AND tablename IN ('requisicoes','requisicao_itens','reposicao_itens','historico')
+       AND tablename IN ('requisicoes','requisicao_itens','reposicao_itens','historico',
+                         'bloqueio_requisicoes')
 
     UNION ALL
     SELECT 9, 'Bucket assinaturas (público)',

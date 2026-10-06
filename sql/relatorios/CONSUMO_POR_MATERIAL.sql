@@ -24,7 +24,9 @@ linhas AS (
     SELECT ri.item_id,
            r.id           AS requisicao_id,
            r.departamento,
-           upper(coalesce(nullif(trim(ri.unidade), ''), nullif(trim(i.unidade), ''), 'UN')) AS unidade,
+           -- Unidade em que foi ENTREGUE (pedido 5 UN, entregue 6,2 KG conta 6,2 KG).
+           upper(coalesce(nullif(trim(ri.unidade_separada), ''), nullif(trim(ri.unidade), ''),
+                          nullif(trim(i.unidade), ''), 'UN')) AS unidade,
            coalesce(ri.quantidade_separada, 0) AS entregue
       FROM public.requisicao_itens ri
       JOIN public.requisicoes r ON r.id = ri.requisicao_id

@@ -50,6 +50,9 @@ src/
                              AtivarAvisos, QuantitySelector, RequireAlmoxarifado,
                              ErroInesperado (tela de erro do app inteiro), ui/
   lib/sobre.ts               versão, desenvolvedor, dados do hotel e telefone do suporte
+  lib/unidades.ts            unidades do item, unidade entregue, avaliarSeparacao, formatarQtd
+  lib/atualizacao.ts         percebe versão nova publicada e oferece "Atualizar"
+  contexts/BloqueioContext   pausa para inventário (estado + tempo real)
   lib/                       utils (contemTexto, precisaLancar, unidades), estilos,
                              saidas (Curva ABC), instalacao (PWA), notificacoes,
                              termoEntrega, toast, sounds
@@ -64,6 +67,11 @@ Scripts na raiz, na ordem:
 3. `AJUSTE_02_LANCAMENTO_TERMO_UNIDADE.sql` — lançamento no TOTVS, termo, unidade por item.
 4. `AJUSTE_03_UNIDADE_NA_RUPTURA_E_ADMIN.sql` — unidade na complementar e na
    reposição; trigger que impede ficar sem Almoxarifado ativo.
+5. `AJUSTE_04_UNIDADES_E_PAUSA_INVENTARIO.sql` — várias unidades por item,
+   unidade entregue na linha, pausa para inventário (versão 1.1).
+
+**Banco em produção com dados reais desde o fim de 09/2026.** Mudança de
+estrutura só por `AJUSTE_NN` que acrescenta; nunca escrever dados de teste nele.
 
 Os ajustes já estão incorporados no `BANCO_DEFINITIVO.sql`; eles existem para
 bancos que já estavam rodando. Toda mudança de estrutura nova vira um

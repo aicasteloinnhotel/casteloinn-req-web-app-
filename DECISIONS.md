@@ -4,6 +4,66 @@ Só o que importa no futuro: a decisão e o motivo. Mais recente no topo.
 
 ---
 
+## Complementar entregue pela metade gera outra complementar
+
+Antes ficava AGUARDANDO para sempre: cada nova tentativa regravava a mesma
+requisição (a REQ #46 chegou a 5 tentativas, cada uma com termo e assinaturas)
+e ela nunca podia ser lançada no TOTVS. Agora complementar e requisição comum
+seguem a mesma regra: fecha com o que foi entregue (RUPTURA_PARCIAL) e o que
+faltou vai para uma complementar nova.
+
+`processar_ruptura` (mesma assinatura) **move** a linha da lista de reposição
+da complementar antiga para a nova, com a quantidade que ainda falta —
+preservando urgência, "já pedido" e a data de entrada — em vez de criar outra
+linha; o que sobrar pendente na antiga é baixado. Complementar sem nada
+entregue não pode ser finalizada (geraria uma cópia de si mesma): a tela pede
+para cancelar a separação.
+
+---
+
+## Unidades por item e unidade entregue (versão 1.1)
+
+Substitui "UN pré-selecionado" (mais abaixo). Pedido da operação: com UN já
+marcado, "5 de carne" virava 5 UN quando a intenção era KG.
+
+- Cada item tem `unidades` (lista); `unidade` é a principal e sempre a
+  primeira da lista — um gatilho no banco garante, inclusive para gravações da
+  versão antiga do app.
+- No pedido a unidade é obrigatória e só aparecem as do item. Item com uma
+  unidade só já vem escolhido: não há o que escolher.
+- Na separação o almoxarifado pode entregar em outra unidade
+  (`requisicao_itens.unidade_separada`). Em unidade diferente não há conta
+  possível (5 UN × 6,2 KG): qualquer quantidade > 0 atende a linha; zero é falta
+  do pedido inteiro, na unidade pedida. O registrado — PDF, TOTVS, Curva ABC,
+  relatório de consumo — é sempre o entregue.
+
+## Pausa para inventário fica no banco
+
+Tabela `bloqueio_requisicoes` (uma linha) + gatilho que recusa requisição
+PENDENTE com a pausa ligada. Só o Almoxarifado pausa e libera: a API só lê a
+tabela, e a alteração passa pela função `definir_bloqueio_requisicoes`, que
+confere o perfil do usuário. No banco, e não só na tela, porque aparelhos com a
+versão antiga aberta também precisam respeitar. A complementar (AGUARDANDO)
+continua sendo criada; editar pedido existente também.
+
+## Imprimir só depois de lançar no TOTVS
+
+Pedido da operação. Requisição entregue e não lançada mostra "Imprimir"
+apagado; tocar nele abre o lançamento. Ao finalizar a separação aparece só
+"finalizada com sucesso": o lançamento é feito depois, quando der tempo — nunca
+na hora da entrega. Ao marcar como lançada, o app oferece a impressão. O
+comprovante traz quem lançou e quem imprimiu. Ruptura total e complementar
+ainda aguardando não têm o que lançar e imprimem como antes.
+
+## Atualização sem reinstalar
+
+O app instalado busca o `index.html` publicado a cada abertura (o service
+worker não guarda cópia). Para quem deixa o app aberto por dias,
+`src/lib/atualizacao.ts` confere ao voltar para a tela e oferece "Atualizar".
+Nunca recarrega sozinho, para não interromper uma separação.
+
+---
+
 ## Ajuda e Sobre numa tela só, com duas abas
 
 Uma entrada no menu em vez de duas: o menu não cresce e ninguém precisa

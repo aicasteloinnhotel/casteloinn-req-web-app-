@@ -1,18 +1,50 @@
 # Status
 
-Última atualização: **25/09/2026**. Conferência final antes da publicação.
+Última atualização: **06/10/2026**. Versão 1.1 pronta, aguardando publicação.
 
 ## Situação geral
 
-App funcional, testado de ponta a ponta contra o Supabase real nos dois perfis
-e no build de produção. Pronto para publicar.
+**Versão 1.0 em produção** desde o fim de setembro, com dados reais (em
+06/10: 495 itens, 53 requisições, 18 usuários). **Nunca escrever dados de teste
+no banco de produção** — nem criar, nem apagar.
+
+**Versão 1.1 pronta para publicar** (06/10/2026). Pacote em
+`Documentos\ATUALIZACAO_APP_v1.1\` (SQL a rodar, os 2 envios do GitHub,
+planilha de unidades e LEIA-ME).
+
+Validação da 1.1:
+- tsc, build e build do zero a partir dos 2 envios (npm ci)
+- testes da lógica de unidades
+- **SQL executado de verdade em PostgreSQL local (PGlite)**: banco novo pelo
+  definitivo; migração de um banco igual ao da 1.0, com caso tipo #46, pelo
+  AJUSTE_04, sem perder dado; repetível; a 1.0 continua funcionando depois;
+  complementar em corrente; pausa e permissões da chave pública; check-up e
+  relatórios (51 verificações OK)
+- planilha de unidades testada no importador (UTF-8 e ANSI do Excel)
+
+Ainda não exercitado: as TELAS gravando contra o banco real (regra de não
+escrever dados de teste em produção). O primeiro uso real com atenção é a
+REQ #46.
+
+### O que entra na 1.1
+
+- Pausa para inventário (suspende criação de requisições; faixa para todos)
+- Imprimir só depois de lançar; PDF com quem lançou e quem imprimiu
+- Rodapé da separação não tampa mais os últimos itens
+- Unidades por item no cadastro (várias), unidade obrigatória no pedido, e
+  unidade entregue diferente da pedida na separação (registra o entregue)
+- CSV acrescenta unidades a itens existentes (`UN/KG`)
+- Aviso de versão nova com botão "Atualizar" (sem reinstalar)
+- Complementar entregue pela metade fecha e gera outra complementar só com o
+  que faltou (a REQ #46 em produção está nesse caso: 5 tentativas, parada em
+  AGUARDANDO — é o primeiro teste real depois de publicar)
 
 ## Concluído (validado no navegador, contra o Supabase real)
 
 - Fluxo completo: pedido → separação → conferência → termo → duas assinaturas → PDF
 - Ruptura automática: complementar + lista de reposição vinculadas, com a unidade do pedido
 - Lançamento no TOTVS: pílula, filtro e modal espelhando a Requisição Manual
-- Unidade por linha do pedido (UN pré-selecionado)
+- Unidade por linha do pedido (na 1.1: obrigatória, só as do item)
 - Avisos em qualquer tela: requisição nova (almoxarifado) e separação iniciada (solicitante)
 - Segurança: senha com bcrypt dentro do banco, coluna `senha` bloqueada na API
 - Trava de separação atômica, com TTL de 30 min
@@ -91,5 +123,7 @@ analisador oficial do PostgreSQL (libpg_query).
 
 ## Próximo passo
 
-1. Publicar no GitHub → Netlify → deploy
-2. Rodar `sql/manutencao/ZERAR_MOVIMENTACAO.sql` e limpar o Storage pelo painel
+1. Rodar `AJUSTE_04_UNIDADES_E_PAUSA_INVENTARIO.sql` (só acrescenta; a 1.0 segue funcionando)
+2. Substituir os arquivos no mesmo repositório do GitHub → o Netlify publica sozinho no mesmo link
+3. Cadastrar as unidades extras dos itens (tela de itens ou CSV `UN/KG`)
+4. **Não** rodar `ZERAR_MOVIMENTACAO.sql` nem `BANCO_DEFINITIVO.sql`: o banco tem dados reais

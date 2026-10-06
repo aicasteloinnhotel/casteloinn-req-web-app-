@@ -1,3 +1,8 @@
+-- ##################################################################################
+-- ✅  JÁ APLICADO no banco em produção (setembro de 2026). NÃO precisa rodar de novo.
+-- ✅  Fica guardado como histórico. Se rodar por engano, não estraga nada.
+-- ##################################################################################
+
 -- ============================================================================
 --  AJUSTE 02 — Lançamento no TOTVS, termo de recebimento e unidade por item
 -- ============================================================================
