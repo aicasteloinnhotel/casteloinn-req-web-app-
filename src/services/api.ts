@@ -1,6 +1,6 @@
 import { supabase, hasSupabaseKeys } from "@/lib/supabase";
 import { formatItemName } from "@/lib/utils";
-import { Item, Usuario, Requisicao, RequisicaoItem, Historico } from "@/types";
+import { Item, Usuario, Requisicao, RequisicaoItem, Historico, BloqueioRequisicoes } from "@/types";
 
 // ====================================== //
 // ============ ITENS SERVICE =========== //
@@ -111,6 +111,7 @@ export const getRequisicoes = async (
       quantidade,
       quantidade_separada,
       unidade,
+      unidade_separada,
       item:itens(*)
     )
   `,
@@ -144,6 +145,7 @@ export const getRequisicao = async (id: string): Promise<Requisicao | null> => {
         quantidade,
         quantidade_separada,
         unidade,
+        unidade_separada,
         item:itens(*)
       )
     `,
@@ -364,11 +366,22 @@ export const getHistorico = async (
   return data;
 };
 
-export const updateRequisicaoItem = async (id: string, quantidade_separada: number | null) => {
+/**
+ * Grava o que foi separado numa linha: quantidade e a unidade em que foi
+ * entregue (pedido 5 UN, entregue 6,2 KG). Desmarcar a linha (null) limpa os dois.
+ */
+export const updateRequisicaoItem = async (
+  id: string,
+  quantidade_separada: number | null,
+  unidade_separada?: string | null,
+) => {
   if (!hasSupabaseKeys) return;
   const { error } = await supabase
     .from("requisicao_itens")
-    .update({ quantidade_separada })
+    .update({
+      quantidade_separada,
+      unidade_separada: quantidade_separada === null ? null : (unidade_separada || null),
+    })
     .eq("id", id);
   if (error) throw error;
 };
@@ -697,6 +710,47 @@ export const updateRequisicaoCompleta = async (
 
   // 5. Registrar no histórico exatamente o que mudou
   await addHistorico(id, "EDITADA", usuarioId, descreverEdicaoDeItens(antes, itens));
+};
+
+// ====================================== //
+// ======= PAUSA PARA INVENTÁRIO ======== //
+// ====================================== //
+
+/** Situação da pausa. Sem a tabela (AJUSTE_04 não rodou), conta como liberado. */
+export const getBloqueioRequisicoes = async (): Promise<BloqueioRequisicoes> => {
+  if (!hasSupabaseKeys) return { ativo: false };
+  const { data, error } = await supabase
+    .from("bloqueio_requisicoes")
+    .select("ativo, motivo, alterado_por, alterado_em")
+    .eq("id", 1)
+    .maybeSingle();
+  if (error || !data) return { ativo: false };
+  return data as BloqueioRequisicoes;
+};
+
+/**
+ * Liga ou desliga a pausa. Vale na hora para todos os aparelhos.
+ * Passa por uma função do banco que confere se quem pede é do Almoxarifado:
+ * a tabela não aceita alteração direta pela API.
+ */
+export const definirBloqueioRequisicoes = async (
+  ativo: boolean,
+  usuarioId: string,
+  motivo?: string,
+) => {
+  if (!hasSupabaseKeys) return;
+  const { error } = await supabase.rpc("definir_bloqueio_requisicoes", {
+    p_usuario_id: usuarioId,
+    p_ativo: ativo,
+    p_motivo: motivo?.trim() || null,
+  });
+  if (error) {
+    // PGRST202 = função não encontrada: o AJUSTE_04 ainda não rodou.
+    if (error.code === "PGRST202") {
+      throw new Error("A pausa ainda não existe no banco. Rode o script AJUSTE_04 no Supabase.");
+    }
+    throw error;
+  }
 };
 
 // ====================================== //

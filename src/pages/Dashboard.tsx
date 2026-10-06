@@ -14,7 +14,9 @@ import {
   ChevronRight,
   RefreshCcw,
   HelpCircle,
+  PauseCircle,
 } from "lucide-react";
+import { useBloqueio } from "@/contexts/BloqueioContext";
 import { useRequisicoesSync } from "@/hooks/useRequisicoesSync";
 import { Requisicao } from "@/types";
 
@@ -24,6 +26,7 @@ const DashboardAlmoxarifado = lazy(() => import("./requisicoes/DashboardAlmoxari
 
 export default function Dashboard() {
   const { user } = useAuth();
+  const { bloqueio } = useBloqueio();
 
   // Load all for ALMOXARIFADO
   const { reqs, loading, updating, lastUpdated, atualizarManualmente } =
@@ -41,6 +44,21 @@ export default function Dashboard() {
           </h1>
         </div>
 
+        {/* Pausa para inventário: o cartão continua no lugar, mas travado e
+            dizendo por quê — sumir com ele confundiria quem usa todo dia. */}
+        {bloqueio.ativo ? (
+          <Card className="w-full border-none shadow-xl shadow-slate-200/60 overflow-hidden bg-white opacity-70 cursor-not-allowed">
+            <CardContent className="p-6 flex items-center gap-4">
+              <div className="bg-amber-50 p-3 rounded-full text-amber-600">
+                <PauseCircle className="h-8 w-8" />
+              </div>
+              <div className="text-left">
+                <h2 className="text-lg font-bold text-slate-800">Nova Requisição</h2>
+                <p className="text-sm font-semibold text-amber-800">Suspensa temporariamente</p>
+              </div>
+            </CardContent>
+          </Card>
+        ) : (
         <Link to="/requisicoes/nova" className="w-full">
           <Card className="hover:ring-2 hover:ring-teal-600 transition-all border-none shadow-xl shadow-slate-200/60 border-slate-200/60 overflow-hidden bg-white group cursor-pointer">
             <CardContent className="p-6 flex items-center justify-between">
@@ -59,6 +77,7 @@ export default function Dashboard() {
             </CardContent>
           </Card>
         </Link>
+        )}
         <Link to="/requisicoes" className="w-full">
           <Card className="hover:ring-2 hover:ring-teal-600 transition-all border-none shadow-xl shadow-slate-200/60 border-slate-200/60 overflow-hidden bg-white group cursor-pointer">
             <CardContent className="p-6 flex items-center justify-between">

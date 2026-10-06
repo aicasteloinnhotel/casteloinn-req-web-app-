@@ -5,6 +5,8 @@ import '@fontsource-variable/inter';
 import './index.css';
 import { iniciarCapturaDeInstalacao } from './lib/instalacao';
 import { ErroInesperado } from './components/ErroInesperado';
+import { vigiarNovaVersao } from './lib/atualizacao';
+import { toast } from './lib/toast';
 
 // Antes de qualquer tela: o convite de instalação do navegador costuma chegar
 // logo no carregamento, ainda no login, e se perdia.
@@ -24,6 +26,16 @@ window.addEventListener('vite:preloadError', (evento) => {
   }
   evento.preventDefault();
   window.location.reload();
+});
+
+// Versão nova publicada enquanto o app estava aberto: avisa e atualiza num
+// toque, sem reinstalar. Não recarrega sozinho para não interromper ninguém
+// no meio de uma separação ou de um pedido.
+vigiarNovaVersao(() => {
+  toast.info('Saiu uma versão nova do app.', {
+    duration: Infinity,
+    action: { label: 'Atualizar', onClick: () => window.location.reload() },
+  });
 });
 
 createRoot(document.getElementById('root')!).render(

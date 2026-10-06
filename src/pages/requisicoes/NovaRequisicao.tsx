@@ -16,10 +16,12 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { Trash2, Plus, Minus, ArrowLeft, Search, List } from "lucide-react";
+import { Trash2, Plus, Minus, ArrowLeft, Search, List, PauseCircle } from "lucide-react";
 import { toast } from "@/lib/toast";
 import { playSound } from "@/lib/sounds";
 import { contemTexto, formatItemName, UNIDADE_PADRAO } from "@/lib/utils";
+import { opcoesDeUnidade, rotuloUnidade, unidadesDoItem } from "@/lib/unidades";
+import { useBloqueio } from "@/contexts/BloqueioContext";
 
 /** Uma linha do pedido em construção. */
 type LinhaPedido = {
@@ -53,8 +55,11 @@ export default function NovaRequisicao() {
   const [buscaItem, setBuscaItem] = useState("");
   const [itemAtual, setItemAtual] = useState("");
   const [qntAtual, setQntAtual] = useState<number | "">(1);
-  const [unidadeAtual, setUnidadeAtual] = useState<string>(UNIDADE_PADRAO);
+  // Começa vazia de propósito: a pessoa escolhe a unidade. Com UN já marcado,
+  // "5 de carne" virava 5 UN quando a intenção era 5 KG.
+  const [unidadeAtual, setUnidadeAtual] = useState<string>("");
   const [dialogOpen, setDialogOpen] = useState(false);
+  const { bloqueio } = useBloqueio();
 
   // Rascunho por usuário: em um tablet compartilhado, a chave única fazia o
   // pedido em andamento de uma camareira aparecer para a próxima que logasse.
@@ -170,27 +175,25 @@ export default function NovaRequisicao() {
     return estoqueItens.filter((i) => contemTexto(i.nome, buscaItem));
   }, [buscaItem, estoqueItens]);
 
-  /**
-   * Unidades que o almoxarifado já usa no catálogo. UN entra sempre, mesmo que
-   * nenhum item esteja cadastrado nela, porque é o padrão do pedido.
-   */
-  const unidadesDisponiveis = useMemo(() => {
-    const conjunto = new Set<string>([UNIDADE_PADRAO]);
-    estoqueItens.forEach((i) => {
-      const u = (i.unidade || "").trim();
-      if (u) conjunto.add(u.toUpperCase());
-    });
-    return Array.from(conjunto).sort((a, b) =>
-      a === UNIDADE_PADRAO ? -1 : b === UNIDADE_PADRAO ? 1 : a.localeCompare(b),
-    );
-  }, [estoqueItens]);
-
   const itemSelecionado = estoqueItens.find((i) => i.id === itemAtual);
-  const unidadeDoCatalogo = (itemSelecionado?.unidade || "").trim().toUpperCase();
+  // Só as unidades cadastradas para ESTE material (ex.: carne = UN e KG).
+  const unidadesDoSelecionado = itemSelecionado ? unidadesDoItem(itemSelecionado) : [];
+
+  /** Escolhe o material. Se ele só tem uma unidade, não há o que escolher. */
+  const escolherItem = (item: Item) => {
+    setItemAtual(item.id);
+    setBuscaItem("");
+    const unidades = unidadesDoItem(item);
+    setUnidadeAtual(unidades.length === 1 ? unidades[0] : "");
+  };
 
   const handleAddItem = () => {
     if (!itemAtual || !qntAtual || Number(qntAtual) <= 0) {
       toast.error("Selecione um item e informe uma quantidade válida.");
+      return;
+    }
+    if (!unidadeAtual) {
+      toast.error("Escolha a unidade: UN, KG, CX...");
       return;
     }
 
@@ -217,7 +220,7 @@ export default function NovaRequisicao() {
 
     setItemAtual("");
     setQntAtual(1);
-    setUnidadeAtual(UNIDADE_PADRAO);
+    setUnidadeAtual("");
     setBuscaItem("");
     toast.success("Item adicionado ao pedido.");
   };
@@ -252,6 +255,11 @@ export default function NovaRequisicao() {
       toast.error(
         `"${formatItemName(semQuantidade.item?.nome)}" está com quantidade zerada. Ajuste ou remova o item.`,
       );
+      return;
+    }
+    const semUnidade = selecionados.find((s) => !s.unidade);
+    if (semUnidade) {
+      toast.error(`Escolha a unidade de "${formatItemName(semUnidade.item?.nome)}".`);
       return;
     }
     if (!user) return;
@@ -297,7 +305,13 @@ export default function NovaRequisicao() {
         }
       }
     } catch (err: any) {
-      toast.error(isEditMode ? "Erro ao atualizar requisição." : "Erro ao enviar requisição.");
+      // P0001 = recusa do próprio banco com mensagem pronta (ex.: requisições
+      // suspensas para inventário). O rascunho continua guardado.
+      toast.error(
+        err?.code === "P0001" && err?.message
+          ? err.message
+          : isEditMode ? "Erro ao atualizar requisição." : "Erro ao enviar requisição.",
+      );
     } finally {
       setLoading(false);
     }
@@ -305,6 +319,30 @@ export default function NovaRequisicao() {
 
   if (isInitializing) {
     return <div className="text-center py-10">Carregando dados...</div>;
+  }
+
+  // Pausa para inventário: pedido novo não sai. Editar um que já existe, sim.
+  // O que estiver no rascunho fica guardado para quando liberar.
+  if (!isEditMode && bloqueio.ativo) {
+    return (
+      <div className="max-w-md mx-auto text-center py-16 space-y-4">
+        <div className="w-14 h-14 rounded-full bg-amber-50 border border-amber-200 flex items-center justify-center mx-auto">
+          <PauseCircle className="w-7 h-7 text-amber-600" />
+        </div>
+        <p className="font-bold text-slate-800">Novas requisições estão suspensas</p>
+        <p className="text-sm text-slate-600">
+          {bloqueio.motivo || "Inventário em andamento"}. Assim que o almoxarifado liberar, dá
+          para pedir de novo — se você já tinha começado um pedido, ele continua guardado.
+        </p>
+        <Button
+          variant="outline"
+          onClick={() => navigate(user?.perfil === "SOLICITANTE" ? "/" : "/requisicoes")}
+          className="font-bold"
+        >
+          Voltar
+        </Button>
+      </div>
+    );
   }
 
   return (
@@ -385,14 +423,13 @@ export default function NovaRequisicao() {
                              <div
                                key={item.id}
                                onClick={() => {
-                                 setItemAtual(item.id);
-                                 setBuscaItem("");
+                                 escolherItem(item);
                                  setDialogOpen(false);
                                }}
                                className="p-3 bg-white border border-slate-200 rounded-lg cursor-pointer hover:border-teal-400 hover:shadow-md hover:shadow-teal-100 transition-all"
                              >
                                <p className="font-bold text-slate-800">{item.nome}</p>
-                               <p className="text-xs font-medium text-slate-700 mt-0.5">{item.unidade}</p>
+                               <p className="text-xs font-medium text-slate-700 mt-0.5">{unidadesDoItem(item).join(" · ")}</p>
                              </div>
                            ))}
                            {estoqueItens.length === 0 && (
@@ -407,17 +444,14 @@ export default function NovaRequisicao() {
                       {itensFiltrados.map((i) => (
                         <div
                           key={i.id}
-                          onClick={() => {
-                            setItemAtual(i.id);
-                            setBuscaItem("");
-                          }}
+                          onClick={() => escolherItem(i)}
                           className="p-3 cursor-pointer hover:bg-teal-50/80 transition-colors"
                         >
                           <p className="font-bold text-slate-800">
                             {i.nome}
                           </p>
                           <p className="text-[11px] font-semibold tracking-wider text-slate-700 uppercase mt-0.5">
-                            {i.unidade}
+                            {unidadesDoItem(i).join(" · ")}
                           </p>
                         </div>
                       ))}
@@ -436,7 +470,7 @@ export default function NovaRequisicao() {
                       {itemSelecionado?.nome}
                     </p>
                     <p className="text-xs text-teal-700">
-                      Cadastrado em {unidadeDoCatalogo || UNIDADE_PADRAO}
+                      Pode ser pedido em: {unidadesDoSelecionado.join(", ")}
                     </p>
                   </div>
                   <Button
@@ -464,21 +498,26 @@ export default function NovaRequisicao() {
                 />
               </div>
 
-              {/* Unidade do pedido. Vem sempre em UN, que é o caso da grande
-                  maioria dos materiais, e muda em um toque quando for caixa,
-                  litro, fardo... */}
-              <div className="w-full sm:w-32 shrink-0">
+              {/* Unidade obrigatória e só as cadastradas para o material.
+                  Material com uma unidade só já vem escolhido. */}
+              <div className="w-full sm:w-36 shrink-0">
                 <Label className="text-sm font-bold text-slate-700 mb-1 block">
-                  Unidade
+                  Unidade <span className="text-red-600">*</span>
                 </Label>
                 <select
                   value={unidadeAtual}
                   onChange={(e) => setUnidadeAtual(e.target.value)}
+                  disabled={!itemAtual}
                   aria-label="Unidade de medida do pedido"
-                  className="w-full h-14 bg-white border border-slate-300 rounded-xl px-3 text-base font-bold text-slate-700 shadow-md focus:outline-none focus:ring-2 focus:ring-teal-500"
+                  className={`w-full h-14 bg-white border rounded-xl px-3 text-base font-bold shadow-md focus:outline-none focus:ring-2 focus:ring-teal-500 disabled:bg-slate-50 disabled:text-slate-400 ${
+                    itemAtual && !unidadeAtual ? "border-amber-400 text-slate-500" : "border-slate-300 text-slate-700"
+                  }`}
                 >
-                  {unidadesDisponiveis.map((u) => (
-                    <option key={u} value={u}>{u}</option>
+                  <option value="" disabled>
+                    {itemAtual ? "Escolha..." : "—"}
+                  </option>
+                  {unidadesDoSelecionado.map((u) => (
+                    <option key={u} value={u}>{u} — {rotuloUnidade(u)}</option>
                   ))}
                 </select>
               </div>
@@ -487,7 +526,7 @@ export default function NovaRequisicao() {
                 <Button
                   type="button"
                   onClick={handleAddItem}
-                  disabled={!itemAtual || !qntAtual}
+                  disabled={!itemAtual || !qntAtual || !unidadeAtual}
                   className="w-full h-14 bg-teal-600 hover:bg-teal-700 text-white font-bold disabled:opacity-50"
                 >
                   <Plus className="h-5 w-5 mr-1" /> Adicionar ao Pedido
@@ -495,13 +534,9 @@ export default function NovaRequisicao() {
               </div>
             </div>
 
-            {/* Aviso discreto: o item está cadastrado em outra unidade. Não
-                impede nada — só evita pedir "10 UN" de um produto que o
-                almoxarifado controla em litros sem perceber. */}
-            {itemAtual && unidadeDoCatalogo && unidadeDoCatalogo !== unidadeAtual && (
-              <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-                Este material é cadastrado em <strong>{unidadeDoCatalogo}</strong>. Você está
-                pedindo em <strong>{unidadeAtual}</strong>.
+            {itemAtual && !unidadeAtual && (
+              <p className="text-xs font-semibold text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                Escolha a unidade antes de adicionar: {unidadesDoSelecionado.join(", ")}.
               </p>
             )}
           </CardContent>
@@ -573,7 +608,9 @@ export default function NovaRequisicao() {
                       aria-label={`Unidade de ${formatItemName(s.item?.nome)}`}
                       className="h-11 w-20 shrink-0 rounded-lg border border-slate-300 bg-white px-2 text-sm font-bold text-slate-700 focus:outline-none focus:ring-2 focus:ring-teal-500"
                     >
-                      {unidadesDisponiveis.map((u) => (
+                      {/* Cadastro atual, não a cópia guardada no rascunho: um
+                          rascunho antigo não conhece as unidades novas do item. */}
+                      {opcoesDeUnidade(estoqueItens.find((e) => e.id === s.item_id) ?? s.item, s.unidade).map((u) => (
                         <option key={u} value={u}>{u}</option>
                       ))}
                     </select>

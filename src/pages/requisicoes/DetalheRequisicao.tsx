@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { useParams, useNavigate, useLocation } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { formatItemName, precisaLancar, unidadeDoItem } from "@/lib/utils";
+import { avaliarSeparacao, formatarQtd, unidadeEntregue } from "@/lib/unidades";
 import { TERMO_TITULO, TERMO_RESUMO_PDF } from "@/lib/termoEntrega";
 import {
   getRequisicao,
@@ -36,7 +37,8 @@ import {
   ClipboardCheck,
   ClipboardList,
   ShieldCheck,
-  Undo2
+  Undo2,
+  Lock
 } from "lucide-react";
 import { toast } from "@/lib/toast";
 import { supabase } from "@/lib/supabase";
@@ -215,9 +217,13 @@ export default function DetalheRequisicao() {
   const [signatureRecebedorBase64, setSignatureRecebedorBase64] = useState<string | null>(location.state?.assinaturaSolicitante || null);
   const [signatureConferenteBase64, setSignatureConferenteBase64] = useState<string | null>(location.state?.assinaturaAlmoxarifado || null);
 
+  // Logo depois de finalizar a separação. O passo seguinte é LANÇAR no TOTVS
+  // (imprimir só vem depois), mas a requisição ainda está carregando aqui —
+  // então só marca, e o efeito abaixo decide quando ela chegar.
+  const [aposFinalizar, setAposFinalizar] = useState(false);
   useEffect(() => {
     if (location.state?.showPrintModal) {
-      setShowPrintModal(true);
+      setAposFinalizar(true);
       window.history.replaceState({}, document.title);
     }
   }, [location.state]);
@@ -247,6 +253,23 @@ export default function DetalheRequisicao() {
 
   const conferenteNome =
     req?.conferente?.nome || conferenteNomeDb || finalizacaoHist?.usuario?.nome;
+
+  // Quem lançou no TOTVS: aparece no detalhe e no comprovante impresso.
+  const [lancadoPorNome, setLancadoPorNome] = useState<string | null>(null);
+  useEffect(() => {
+    let ativo = true;
+    if (req?.lancado && req.lancado_por) {
+      getUsuarioNome(req.lancado_por).then((nome) => {
+        if (ativo) setLancadoPorNome(nome);
+      });
+    } else {
+      setLancadoPorNome(null);
+    }
+    return () => { ativo = false; };
+  }, [req?.lancado, req?.lancado_por]);
+
+  /** Entregue e ainda não lançada: a impressão espera o lançamento. */
+  const aguardaLancamento = !!req && precisaLancar(req.status) && !req.lancado;
 
   const handleStartSeparacao = async () => {
     if (!req || !user) return;
@@ -298,6 +321,12 @@ export default function DetalheRequisicao() {
   const exportPDF = async (mode: 'download' | 'print' = 'download') => {
     if (!req) return;
     if (user?.perfil !== "ALMOXARIFADO") return;
+    // Regra da operação: o comprovante só sai depois do lançamento no TOTVS.
+    if (aguardaLancamento) {
+      toast.info("Lance no TOTVS antes de imprimir.");
+      setShowLancamento(true);
+      return;
+    }
     setIsExporting(true);
     try {
     // A biblioteca de PDF (jsPDF + html2canvas) pesa quase 400 kB e só é usada
@@ -312,12 +341,14 @@ export default function DetalheRequisicao() {
     // comprovante de uma página passava de 2 MB.
     const doc = new jsPDF({ compress: true });
 
-    const head = [["Item", "Qtd Solicitada", "Qtd Separada", "Unidade", "Conferência"]];
+    // Pedido e entregue cada um com a sua unidade: "5 UN" pedido, "6,2 KG" entregue.
+    const head = [["Item", "Solicitado", "Entregue", "Conferência"]];
     const body = req.itens?.map((i) => [
       formatItemName(i.item?.nome),
-      i.quantidade.toString(),
-      i.quantidade_separada !== undefined && i.quantidade_separada !== null ? i.quantidade_separada.toString() : "",
-      unidadeDoItem(i),
+      `${formatarQtd(i.quantidade)} ${unidadeDoItem(i)}`,
+      i.quantidade_separada !== undefined && i.quantidade_separada !== null
+        ? `${formatarQtd(i.quantidade_separada)} ${unidadeEntregue(i)}`
+        : "",
       (req.status === 'FINALIZADA' || req.status === 'RUPTURA_PARCIAL' || req.status === 'RUPTURA_TOTAL' || signatureRecebedorBase64 || signatureConferenteBase64) ? "[X]" : ""
     ]) || [];
 
@@ -338,10 +369,9 @@ export default function DetalheRequisicao() {
       },
       columnStyles: {
         0: { halign: 'left', cellWidth: 'auto' }, // Item
-        1: { halign: 'center', cellWidth: 28 }, // Qtd Solicitada
-        2: { halign: 'center', cellWidth: 28 }, // Qtd Separada
-        3: { halign: 'center', cellWidth: 22 }, // Unidade
-        4: { halign: 'center', cellWidth: 25 }  // Conferência
+        1: { halign: 'center', cellWidth: 32 }, // Solicitado (qtd + unidade)
+        2: { halign: 'center', cellWidth: 32 }, // Entregue (qtd + unidade)
+        3: { halign: 'center', cellWidth: 25 }  // Conferência
       },
       styles: { 
         fontSize: 9,
@@ -394,8 +424,29 @@ export default function DetalheRequisicao() {
       }
     });
 
-    let finalY = (doc as any).lastAutoTable.finalY + 10;
-    
+    let finalY = (doc as any).lastAutoTable.finalY + 8;
+
+    // Quem lançou no TOTVS e quem imprimiu: o papel diz de quem cobrar.
+    const nomeDeQuemLancou =
+      lancadoPorNome || (req.lancado && req.lancado_por ? await getUsuarioNome(req.lancado_por) : null);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8.5);
+    if (req.lancado) {
+      doc.text(
+        `Lançado no TOTVS por: ${nomeDeQuemLancou || "---"}` +
+          (req.lancado_em ? ` em ${format(new Date(req.lancado_em), "dd/MM/yyyy 'às' HH:mm")}` : ""),
+        14,
+        finalY,
+      );
+      finalY += 5;
+    }
+    doc.text(
+      `${mode === "print" ? "Impresso" : "PDF gerado"} por: ${user?.nome || "---"} em ${format(new Date(), "dd/MM/yyyy 'às' HH:mm")}`,
+      14,
+      finalY,
+    );
+    finalY += 9;
+
     if (req.observacao) {
       if (finalY > 260) {
         doc.addPage();
@@ -535,6 +586,16 @@ export default function DetalheRequisicao() {
   // Lançamento no TOTVS: a requisição só sai do radar depois de lançada.
   const [showLancamento, setShowLancamento] = React.useState(false);
 
+  // Recém-finalizada: só confirma que deu certo. Lançar no TOTVS e imprimir
+  // ficam para depois, quando der tempo — na operação real ninguém lança na
+  // hora da entrega.
+  const [showFinalizada, setShowFinalizada] = React.useState(false);
+  useEffect(() => {
+    if (!aposFinalizar || !req) return;
+    setAposFinalizar(false);
+    setShowFinalizada(true);
+  }, [aposFinalizar, req]);
+
   const handleMarcarLancada = async () => {
     if (!req || !user) return;
     setUpdating(true);
@@ -544,6 +605,8 @@ export default function DetalheRequisicao() {
       toast.success(`REQ #${req.codigo_requisicao} marcada como lançada no TOTVS.`);
       setShowLancamento(false);
       await carregarDetalhes(req.id);
+      // Lançou: agora sim, oferece imprimir o comprovante.
+      setShowPrintModal(true);
     } catch (e: any) {
       toast.error(`Não foi possível marcar como lançada: ${e?.message || "erro de comunicação"}`);
     } finally {
@@ -638,16 +701,17 @@ export default function DetalheRequisicao() {
   // (nada saiu) não entram. Já lançada continua acessível, para desfazer.
   const podeLancar = ehAlmoxarifado && (precisaLancar(req.status) || !!req.lancado);
 
-  /** Linhas do jeito que o TOTVS precisa: material, quantidade entregue, unidade. */
-  const todasAsLinhas = (req.itens || []).map((linha) => ({
-    id: linha.id,
-    nome: formatItemName(linha.item?.nome),
-    quantidade:
-      linha.quantidade_separada !== undefined && linha.quantidade_separada !== null
-        ? linha.quantidade_separada
-        : linha.quantidade,
-    unidade: unidadeDoItem(linha),
-  }));
+  /** Linhas do jeito que o TOTVS precisa: material, quantidade ENTREGUE e a
+   *  unidade em que saiu (pedido 5 UN, entregue 6,2 KG → lança 6,2 KG). */
+  const todasAsLinhas = (req.itens || []).map((linha) => {
+    const separada = linha.quantidade_separada !== undefined && linha.quantidade_separada !== null;
+    return {
+      id: linha.id,
+      nome: formatItemName(linha.item?.nome),
+      quantidade: separada ? Number(linha.quantidade_separada) : linha.quantidade,
+      unidade: separada ? unidadeEntregue(linha) : unidadeDoItem(linha),
+    };
+  });
   // Item que não saiu (entregue 0) não se lança: ele foi para a complementar.
   // Antes aparecia "PAPEL TOALHA — 0" na lista e no "Copiar lista".
   const linhasParaLancamento = todasAsLinhas.filter((l) => Number(l.quantidade) > 0);
@@ -702,14 +766,21 @@ export default function DetalheRequisicao() {
 
         {(podeExportarEImprimir || podeLancar) && (
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full sm:w-auto">
+            {/* Imprimir só depois de lançar no TOTVS. Antes disso o botão
+                aparece apagado; tocar nele explica e abre o lançamento. */}
             {podeExportarEImprimir && (
               <button
                 type="button"
                 onClick={handlePrint}
                 disabled={isExporting}
-                className="text-teal-900 hover:text-teal-950 hover:bg-slate-100 border border-slate-300 bg-white w-full sm:w-auto flex items-center justify-center gap-2 h-9 px-4 rounded-lg text-sm font-medium transition-colors"
+                title={aguardaLancamento ? "Lance no TOTVS antes de imprimir" : "Imprimir o comprovante"}
+                className={`w-full sm:w-auto flex items-center justify-center gap-2 h-9 px-4 rounded-lg text-sm font-medium transition-colors border ${
+                  aguardaLancamento
+                    ? "border-slate-200 bg-slate-50 text-slate-400"
+                    : "text-teal-900 hover:text-teal-950 hover:bg-slate-100 border-slate-300 bg-white"
+                }`}
               >
-                <Printer className="h-4 w-4" /> Imprimir
+                {aguardaLancamento ? <Lock className="h-4 w-4" /> : <Printer className="h-4 w-4" />} Imprimir
               </button>
             )}
 
@@ -868,29 +939,45 @@ export default function DetalheRequisicao() {
                   <div className="flex items-center gap-4 sm:gap-6 self-end sm:self-auto">
                       <div className="text-center">
                         <p className="text-[10px] font-bold text-slate-700 uppercase mb-1">Solicitado</p>
-                        <p className="text-lg font-black text-slate-700">{prod.quantidade} <span className="text-sm font-bold text-slate-700">{unidadeDoItem(prod)}</span></p>
+                        <p className="text-lg font-black text-slate-700 whitespace-nowrap">{formatarQtd(prod.quantidade)} <span className="text-sm font-bold text-slate-700">{unidadeDoItem(prod)}</span></p>
                       </div>
-                      
-                      {(prod.quantidade_separada !== undefined && prod.quantidade_separada !== null) && (
-                        <div className="text-center">
-                          <p className="text-[10px] font-bold text-teal-600 uppercase mb-1">Separado</p>
-                          <p className="text-lg font-black text-teal-700">{prod.quantidade_separada} <span className="text-sm font-bold text-teal-600">{unidadeDoItem(prod)}</span></p>
-                        </div>
-                      )}
 
-                      {(prod.quantidade_separada !== undefined && prod.quantidade_separada !== null && prod.quantidade_separada < prod.quantidade) && (
-                        <div className="text-center bg-orange-50 px-3 py-1 rounded-lg border border-orange-200">
-                          <p className="text-[10px] font-bold text-orange-600 uppercase mb-1">Ruptura</p>
-                          <p className="text-lg font-black text-orange-700">-{prod.quantidade - prod.quantidade_separada} <span className="text-sm font-bold text-orange-500">{unidadeDoItem(prod)}</span></p>
-                        </div>
-                      )}
+                      {(() => {
+                        if (prod.quantidade_separada === undefined || prod.quantidade_separada === null) return null;
+                        const unEntregue = unidadeEntregue(prod);
+                        const r = avaliarSeparacao(prod.quantidade, unidadeDoItem(prod), prod.quantidade_separada, unEntregue);
+                        return (
+                          <>
+                            {/* O que fica registrado é o entregue, na unidade
+                                em que saiu (pedido 5 UN, entregue 6,2 KG). */}
+                            <div className="text-center">
+                              <p className="text-[10px] font-bold text-teal-600 uppercase mb-1">Entregue</p>
+                              <p className="text-lg font-black text-teal-700 whitespace-nowrap">{formatarQtd(prod.quantidade_separada)} <span className="text-sm font-bold text-teal-600">{unEntregue}</span></p>
+                            </div>
 
-                      {(prod.quantidade_separada !== undefined && prod.quantidade_separada !== null && prod.quantidade_separada > prod.quantidade) && (
-                        <div className="text-center bg-teal-50 px-3 py-1 rounded-lg border border-teal-200">
-                          <p className="text-[10px] font-bold text-teal-600 uppercase mb-1">Excedente</p>
-                          <p className="text-lg font-black text-teal-700">+{prod.quantidade_separada - prod.quantidade} <span className="text-sm font-bold text-teal-500">{unidadeDoItem(prod)}</span></p>
-                        </div>
-                      )}
+                            {r.situacao === "falta" && (
+                              <div className="text-center bg-orange-50 px-3 py-1 rounded-lg border border-orange-200">
+                                <p className="text-[10px] font-bold text-orange-600 uppercase mb-1">Ruptura</p>
+                                <p className="text-lg font-black text-orange-700 whitespace-nowrap">-{formatarQtd(r.faltante)} <span className="text-sm font-bold text-orange-500">{unidadeDoItem(prod)}</span></p>
+                              </div>
+                            )}
+
+                            {r.situacao === "excedente" && (
+                              <div className="text-center bg-teal-50 px-3 py-1 rounded-lg border border-teal-200">
+                                <p className="text-[10px] font-bold text-teal-600 uppercase mb-1">Excedente</p>
+                                <p className="text-lg font-black text-teal-700 whitespace-nowrap">+{formatarQtd(r.excedente)} <span className="text-sm font-bold text-teal-500">{unEntregue}</span></p>
+                              </div>
+                            )}
+
+                            {r.situacao === "outra_unidade" && (
+                              <div className="text-center bg-sky-50 px-3 py-1 rounded-lg border border-sky-200">
+                                <p className="text-[10px] font-bold text-sky-700 uppercase mb-1">Unidade</p>
+                                <p className="text-xs font-bold text-sky-800 leading-tight">trocada<br />na entrega</p>
+                              </div>
+                            )}
+                          </>
+                        );
+                      })()}
                     </div>
                 </div>
               ))}
@@ -1133,7 +1220,7 @@ export default function DetalheRequisicao() {
                   <div key={linha.id} className="grid grid-cols-[1fr_3rem_4rem] gap-2 px-3 py-2.5 items-center">
                     <span className="text-sm font-semibold text-slate-800 break-words min-w-0 uppercase">{linha.nome}</span>
                     <span className="text-xs font-bold text-slate-600 text-center">{linha.unidade}</span>
-                    <span className="text-base font-black text-teal-800 text-right tabular-nums">{linha.quantidade}</span>
+                    <span className="text-base font-black text-teal-800 text-right tabular-nums">{formatarQtd(linha.quantidade)}</span>
                   </div>
                 ))}
                 {linhasParaLancamento.length === 0 && (
@@ -1165,7 +1252,8 @@ export default function DetalheRequisicao() {
                   `Nº da Requisição: ${req.codigo_requisicao ?? ""}`,
                   `Data: ${format(new Date(req.created_at), "dd/MM/yyyy")}`,
                   "",
-                  ...linhasParaLancamento.map((l) => `${l.nome}\t${l.unidade}\t${l.quantidade}`),
+                  // Vírgula decimal (6,2), como o TOTVS espera.
+                  ...linhasParaLancamento.map((l) => `${l.nome}\t${l.unidade}\t${formatarQtd(l.quantidade)}`),
                 ].join("\n");
                 try {
                   await navigator.clipboard.writeText(texto);
@@ -1180,7 +1268,8 @@ export default function DetalheRequisicao() {
 
             {req.lancado && req.lancado_em && (
               <p className="text-xs text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-lg p-3 font-medium">
-                Lançada em {format(new Date(req.lancado_em), "dd/MM/yyyy 'às' HH:mm")}.
+                Lançada em {format(new Date(req.lancado_em), "dd/MM/yyyy 'às' HH:mm")}
+                {lancadoPorNome ? <> por <strong>{lancadoPorNome}</strong></> : null}.
               </p>
             )}
           </div>
@@ -1214,13 +1303,44 @@ export default function DetalheRequisicao() {
       </Dialog>
       )}
 
+      {/* Confirmação logo depois de finalizar a separação. Só isso: lançar e
+          imprimir são feitos depois, pelos botões do topo. */}
+      <Dialog open={showFinalizada} onOpenChange={setShowFinalizada}>
+        <DialogContent className="sm:max-w-md">
+          <div className="flex flex-col items-center gap-3 pt-2 text-center">
+            <span className="flex h-14 w-14 items-center justify-center rounded-full bg-emerald-100 text-emerald-700">
+              <Check className="h-8 w-8" />
+            </span>
+            <DialogHeader className="items-center">
+              <DialogTitle className="text-center">Requisição #{req.codigo_requisicao} finalizada com sucesso</DialogTitle>
+              <DialogDescription className="text-center">
+                {req.status === "RUPTURA_PARCIAL" || req.status === "RUPTURA_TOTAL"
+                  ? `Entrega registrada. O que faltou foi para a requisição complementar${rel?.complementar ? ` REQ #${rel.complementar.codigo}` : ""} e para a Lista de Reposição.`
+                  : req.status === "AGUARDANDO"
+                    ? "Entrega registrada. Ainda há itens pendentes: a requisição continua aguardando reposição."
+                    : "Entrega registrada com as assinaturas."}
+                {precisaLancar(req.status) && " Quando der tempo, use o botão Lançar no topo; o Imprimir libera depois do lançamento."}
+              </DialogDescription>
+            </DialogHeader>
+          </div>
+          <Button
+            onClick={() => setShowFinalizada(false)}
+            className="mt-2 h-12 w-full bg-emerald-600 font-bold text-white hover:bg-emerald-700"
+          >
+            OK
+          </Button>
+        </DialogContent>
+      </Dialog>
+
       {(user?.perfil === "ALMOXARIFADO") && (
       <Dialog open={showPrintModal} onOpenChange={setShowPrintModal}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Requisição Finalizada</DialogTitle>
+            <DialogTitle>{req.lancado ? "Lançada no TOTVS" : "Imprimir comprovante"}</DialogTitle>
             <DialogDescription>
-              A separação foi concluída. Escolha como deseja documentar a requisição.
+              {req.lancado
+                ? "Agora imprima ou exporte o comprovante. Ele sai com o nome de quem lançou e de quem imprimiu."
+                : "Escolha como deseja documentar a requisição."}
             </DialogDescription>
           </DialogHeader>
           <div className="flex flex-col gap-3 py-4">

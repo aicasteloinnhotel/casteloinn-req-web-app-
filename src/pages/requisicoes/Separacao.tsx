@@ -3,6 +3,13 @@ import { useParams, useNavigate, useLocation, Navigate } from "react-router-dom"
 import { useAuth } from "@/contexts/AuthContext";
 import { contemTexto, formatItemName, unidadeDoItem } from "@/lib/utils";
 import {
+  avaliarSeparacao,
+  formatarQtd,
+  opcoesDeUnidade,
+  unidadeEntregue,
+  unidadesDoItem,
+} from "@/lib/unidades";
+import {
   getRequisicao,
   updateRequisicaoStatus,
   unlockRequisicao,
@@ -54,6 +61,9 @@ export default function Separacao() {
   const [checkedItems, setCheckedItems] = useState<Set<string>>(new Set());
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
   const [qtds, setQtds] = useState<Record<string, number>>({});
+  // Unidade em que cada linha está sendo entregue. Começa na unidade do pedido
+  // e o almoxarifado pode trocar (pedido 5 UN de carne, entregue 6,2 KG).
+  const [unids, setUnids] = useState<Record<string, string>>({});
   const [isFinishing, setIsFinishing] = useState(false);
   
   const [currentPage, setCurrentPage] = useState(1);
@@ -78,6 +88,7 @@ export default function Separacao() {
   const [searchItem, setSearchItem] = useState("");
   const [selectedNewItem, setSelectedNewItem] = useState<Item | null>(null);
   const [newItemQtd, setNewItemQtd] = useState<number | "">("");
+  const [newItemUnidade, setNewItemUnidade] = useState("");
   const [isAddingItem, setIsAddingItem] = useState(false);
 
   useEffect(() => {
@@ -91,17 +102,20 @@ export default function Separacao() {
     if (req) {
       playSound('start');
       const initialQtds: Record<string, number> = {};
+      const initialUnids: Record<string, string> = {};
       const initialChecked = new Set<string>();
       req.itens?.forEach(item => {
-        const qt = item.quantidade_separada !== undefined && item.quantidade_separada !== null 
-          ? item.quantidade_separada 
+        const qt = item.quantidade_separada !== undefined && item.quantidade_separada !== null
+          ? item.quantidade_separada
           : item.quantidade;
         initialQtds[item.id] = qt;
+        initialUnids[item.id] = unidadeEntregue(item);
         if (item.quantidade_separada !== undefined && item.quantidade_separada !== null) {
           initialChecked.add(item.id);
         }
       });
       setQtds(initialQtds);
+      setUnids(initialUnids);
       setCheckedItems(initialChecked);
       setEditingItemId(null);
     }
@@ -184,11 +198,15 @@ export default function Separacao() {
     // Auto-save logic
     try {
       const currentQt = qtds[itemId] || 0;
-      await updateRequisicaoItem(itemId, isChecked ? currentQt : null);
+      await updateRequisicaoItem(itemId, isChecked ? currentQt : null, unids[itemId]);
     } catch (e) {
       console.error("Auto-save failed:", e);
     }
   };
+
+  /** Unidade em que a linha está sendo entregue agora. */
+  const unidadeSeparadaDe = (linha: RequisicaoItemComDetalhes) =>
+    unids[linha.id] || unidadeDoItem(linha);
 
   const allItems = req?.itens || [];
   const totalItems = allItems.length;
@@ -223,6 +241,15 @@ export default function Separacao() {
   };
 
   const prepareConference = () => {
+    // Complementar sem nada entregue: finalizar só criaria outra complementar
+    // igual, com termo e assinaturas de uma entrega que não houve.
+    const nadaEntregue = (req?.itens || []).every((item) => !(Number(qtds[item.id]) > 0));
+    if (req?.status === "AGUARDANDO" && nadaEntregue) {
+      toast.error(
+        "Nada foi entregue nesta complementar. Use Cancelar: ela continua aguardando até o material chegar.",
+      );
+      return;
+    }
     setConferenciaChecks({});
     setSignatureStep(1);
     setTemAssinaturaSolicitante(false);
@@ -303,94 +330,91 @@ export default function Separacao() {
            qtSeparada = item.quantidade_separada !== undefined && item.quantidade_separada !== null ? item.quantidade_separada : item.quantidade;
         }
         const qtSolicitada = item.quantidade;
+        const unPedida = unidadeDoItem(item);
+        const unEntregue = unidadeSeparadaDe(item);
+        const nomeItem = formatItemName(item.item?.nome);
+        const resultado = avaliarSeparacao(qtSolicitada, unPedida, qtSeparada, unEntregue);
 
-        // 1. Atualizar a quantidade separada do item no Supabase
-        await updateRequisicaoItem(item.id, qtSeparada);
+        // 1. Grava o que foi entregue: quantidade E unidade. É o que fica
+        //    registrado no fim (pedido 5 UN, entregue 6,2 KG → 6,2 KG).
+        await updateRequisicaoItem(item.id, qtSeparada, unEntregue);
 
         if (qtSeparada > 0) {
           allItemsZero = false;
         }
-        
+
+        const qtFaltante = resultado.situacao === "falta" ? resultado.faltante : 0;
+
         // Atualizar a quantidade da lista de reposicao se for complementar
         if (isComplementarAct) {
           try {
-            const qtFaltante = Math.max(0, qtSolicitada - qtSeparada);
-            await atualizarQuantidadeReposicao(req.id, item.item_id, qtFaltante, user.id, unidadeDoItem(item));
+            await atualizarQuantidadeReposicao(req.id, item.item_id, qtFaltante, user.id, unPedida);
           } catch (err) {
             console.error("Erro ao atualizar da reposicao:", err);
           }
         }
 
-        if (qtSeparada < qtSolicitada) {
+        if (resultado.situacao === "falta") {
           hasRuptureChanges = true;
-          const qtFaltante = qtSolicitada - qtSeparada;
-          
+
+          // A falta é sempre na unidade em que foi PEDIDO: é o que a
+          // complementar e a lista de compras precisam repor.
           itemsInRupture.push({
             item_id: item.item_id,
-            nome: formatItemName(item.item?.nome) || "Item",
-            unidade: unidadeDoItem(item),
+            nome: nomeItem || "Item",
+            unidade: unPedida,
             quantidade: qtFaltante
           });
 
           const rupturaTipo = qtSeparada === 0 ? "RUPTURA TOTAL" : "RUPTURA PARCIAL";
-          const msg = `Item: ${formatItemName(item.item?.nome)} | Solicitado: ${qtSolicitada} | Separado: ${qtSeparada} | Faltante: ${qtFaltante} | Tipo: ${rupturaTipo}`;
+          const msg = `Item: ${nomeItem} | Solicitado: ${formatarQtd(qtSolicitada)} ${unPedida} | Separado: ${formatarQtd(qtSeparada)} ${unEntregue} | Faltante: ${formatarQtd(qtFaltante)} ${unPedida} | Tipo: ${rupturaTipo}`;
           await addHistorico(req.id, qtSeparada === 0 ? "RUPTURA_TOTAL" : "RUPTURA_PARCIAL", user.id, msg);
-        } else if (qtSeparada > qtSolicitada) {
-          const qtExcedente = qtSeparada - qtSolicitada;
-          const msg = `Item: ${formatItemName(item.item?.nome)} | Solicitado: ${qtSolicitada} | Separado: ${qtSeparada} | Excedente: +${qtExcedente}`;
+        } else if (resultado.situacao === "excedente") {
+          const msg = `Item: ${nomeItem} | Solicitado: ${formatarQtd(qtSolicitada)} ${unPedida} | Separado: ${formatarQtd(qtSeparada)} ${unEntregue} | Excedente: +${formatarQtd(resultado.excedente)} ${unPedida}`;
+          await addHistorico(req.id, "ITENS_EDITADOS", user.id, msg);
+        } else if (resultado.situacao === "outra_unidade") {
+          const msg = `Item: ${nomeItem} | Solicitado: ${formatarQtd(qtSolicitada)} ${unPedida} | Entregue: ${formatarQtd(qtSeparada)} ${unEntregue} (em outra unidade)`;
           await addHistorico(req.id, "ITENS_EDITADOS", user.id, msg);
         }
       }
 
-      if (isComplementarAct) {
-        // Se a requisição atual já for complementar (AGUARDANDO)
-        if (hasRuptureChanges) {
-          // Mantém como AGUARDANDO para nova tentativa posterior (regra 7)
-          await addHistorico(
-            req.id,
-            "AGUARDANDO",
-            user.id,
-            "Separação da requisição complementar realizada com pendências. Mantido status AGUARDANDO."
-          );
+      // Requisição comum e complementar seguem a MESMA regra: fecha com o que
+      // foi entregue e, se faltou algo, nasce uma complementar só com a falta.
+      //
+      // Antes a complementar entregue pela metade ficava AGUARDANDO para
+      // sempre: cada tentativa regravava a mesma requisição (outro termo,
+      // outras assinaturas) e ela nunca podia ser lançada no TOTVS.
+      if (hasRuptureChanges) {
+        const statusGeral = allItemsZero ? "RUPTURA_TOTAL" : "RUPTURA_PARCIAL";
 
-          playSound('finish');
-          toast.success("Separação salva! Como a requisição já é complementar, o status continua AGUARDANDO.");
-        } else {
-          // Totalmente atendida! Finaliza.
-          await updateRequisicaoStatus(req.id, "FINALIZADA", user.id);
-          playSound('finish');
-          toast.success("Requisição de reposição finalizada com sucesso!");
-        }
+        // A função do banco faz tudo numa transação só: fecha esta
+        // requisição, cria a complementar e põe cada falta na lista de
+        // reposição, na unidade em que foi pedida. Se esta já era
+        // complementar, a falta que estava na lista MUDA para a nova (com
+        // urgência e "já pedido" preservados), em vez de duplicar.
+        await processarRuptura(
+          req.id,
+          statusGeral,
+          itemsInRupture.map(i => ({
+            item_id: i.item_id,
+            quantidade: i.quantidade,
+            unidade: i.unidade,
+          }))
+        );
+
+        playSound('finish');
+        toast.success(
+          isComplementarAct
+            ? "Entrega registrada. O que ainda faltou foi para uma nova complementar."
+            : "Requisição finalizada com rupturas.",
+        );
       } else {
-        // Se for uma requisição normal (PENDENTE ou SEPARANDO)
-        if (hasRuptureChanges) {
-          const statusGeral = allItemsZero ? "RUPTURA_TOTAL" : "RUPTURA_PARCIAL";
-
-          // A função do banco faz tudo numa transação só: fecha esta
-          // requisição, cria a complementar e lança cada falta na lista de
-          // reposição — com a unidade em que o material foi pedido.
-          //
-          // Antes, o app gravava a reposição de novo aqui, item por item.
-          // Era redundante e, com o mesmo material em duas unidades, a segunda
-          // gravação sobrescrevia a quantidade da primeira.
-          await processarRuptura(
-            req.id,
-            statusGeral,
-            itemsInRupture.map(i => ({
-              item_id: i.item_id,
-              quantidade: i.quantidade,
-              unidade: i.unidade,
-            }))
-          );
-
-          playSound('finish');
-          toast.success(`Requisição finalizada com rupturas.`);
-        } else {
-          // Finalizada sem rupturas
-          await updateRequisicaoStatus(req.id, "FINALIZADA", user.id);
-          playSound('finish');
-          toast.success("Requisição finalizada com sucesso!");
-        }
+        // Tudo entregue.
+        await updateRequisicaoStatus(req.id, "FINALIZADA", user.id);
+        playSound('finish');
+        toast.success(
+          isComplementarAct ? "Requisição complementar finalizada com sucesso!" : "Requisição finalizada com sucesso!",
+        );
       }
 
       await unlockRequisicao(req.id);
@@ -415,6 +439,10 @@ export default function Separacao() {
 
   const handleAddItemToReq = async () => {
     if (!selectedNewItem || !req || !user || !newItemQtd) return;
+    if (!newItemUnidade) {
+      toast.error("Escolha a unidade do item.");
+      return;
+    }
     setIsAddingItem(true);
     try {
       const newItemInfo = {
@@ -422,7 +450,8 @@ export default function Separacao() {
         item_id: selectedNewItem.id,
         quantidade: 0, // Solicitado originalmente 0
         quantidade_separada: Number(newItemQtd),
-        unidade: selectedNewItem.unidade || "UN",
+        unidade: newItemUnidade,
+        unidade_separada: newItemUnidade,
       };
       
       const addedItem = await addRequisicaoItem(newItemInfo);
@@ -437,6 +466,7 @@ export default function Separacao() {
         setReq({ ...req, itens: updatedItems });
         
         setQtds(prev => ({ ...prev, [addedItem.id]: Number(newItemQtd) }));
+        setUnids(prev => ({ ...prev, [addedItem.id]: newItemUnidade }));
         
         // O item adicionado inicia desmarcado (pendente de conferência) conforme solicitado
         // Não é mais adicionado automaticamente a checkedItems
@@ -445,13 +475,14 @@ export default function Separacao() {
           req.id,
           "ITENS_EDITADOS",
           user.id,
-          `Item adicionado durante separação: ${selectedNewItem.nome} | Adicionado: ${newItemQtd} ${selectedNewItem.unidade}`
+          `Item adicionado durante separação: ${formatItemName(selectedNewItem.nome)} | Adicionado: ${formatarQtd(Number(newItemQtd))} ${newItemUnidade}`
         );
-        
+
         toast.success("Item adicionado com sucesso!");
         setShowAddItem(false);
         setSelectedNewItem(null);
         setNewItemQtd("");
+        setNewItemUnidade("");
         setSearchItem("");
       }
     } catch (e) {
@@ -477,7 +508,7 @@ export default function Separacao() {
   if (!req) return null;
 
   return (
-    <div className="flex flex-col bg-white text-slate-800 rounded-xl shadow-lg shadow-slate-200/50 border border-slate-200/80 relative h-[calc(100vh-6rem)] overflow-hidden">
+    <div className="flex flex-col bg-white text-slate-800 rounded-xl shadow-lg shadow-slate-200/50 border border-slate-200/80 relative h-[calc(100dvh-6rem)] overflow-hidden">
       {/* Header Compacto */}
       <div className="flex items-center justify-between px-3 py-3 sm:py-4 bg-slate-100 border-b shrink-0 rounded-t-xl">
         <div className="flex flex-col sm:flex-row sm:items-center gap-2">
@@ -521,21 +552,38 @@ export default function Separacao() {
         </div>
       </div>
 
-      {/* Lista de Itens */}
-      <div className="flex-1 flex flex-col overflow-y-auto overflow-x-hidden w-full pb-28 sm:pb-32">
+      {/* Lista de Itens. Ocupa o espaço que sobra entre o cabeçalho e o rodapé:
+          antes o rodapé ficava POR CIMA da lista, e numa requisição grande o
+          aviso "Faltam N itens" tampava os últimos itens, impedindo marcá-los. */}
+      <div className="flex-1 min-h-0 flex flex-col overflow-y-auto overflow-x-hidden w-full">
         <div className="w-full min-w-[320px]">
-          {currentItems.map((prod, index) => {
+          {currentItems.map((prod) => {
             const isChecked = checkedItems.has(prod.id);
             const isEditing = editingItemId === prod.id;
             const qtSolicitada = prod.quantidade;
             const qtSeparada = qtds[prod.id] !== undefined ? qtds[prod.id] : qtSolicitada;
-            
-            const isRuptura = qtSeparada < qtSolicitada;
-            const isExcedente = qtSeparada > qtSolicitada;
+            const unPedida = unidadeDoItem(prod);
+            const unSep = unidadeSeparadaDe(prod);
+            const resultado = avaliarSeparacao(qtSolicitada, unPedida, qtSeparada, unSep);
+
+            const etiqueta =
+              resultado.situacao === "falta" ? (
+                <span className="text-[11px] font-bold text-orange-700 bg-orange-50 border border-orange-200 px-1.5 py-0.5 rounded whitespace-nowrap">
+                  Falta {formatarQtd(resultado.faltante)} {unPedida}
+                </span>
+              ) : resultado.situacao === "excedente" ? (
+                <span className="text-[11px] font-bold text-teal-700 bg-teal-50 border border-teal-200 px-1.5 py-0.5 rounded whitespace-nowrap">
+                  A mais {formatarQtd(resultado.excedente)}
+                </span>
+              ) : resultado.situacao === "outra_unidade" ? (
+                <span className="text-[11px] font-bold text-sky-800 bg-sky-50 border border-sky-200 px-1.5 py-0.5 rounded whitespace-nowrap">
+                  Entregue em {unSep}
+                </span>
+              ) : null;
 
             return (
               <div key={prod.id} className="border-b border-slate-100 flex flex-col">
-                <div 
+                <div
                   className={`flex items-center px-2 sm:px-4 py-1.5 sm:py-2 transition-colors cursor-pointer ${isChecked ? 'bg-slate-50/50' : 'hover:bg-slate-50'}`}
                   onClick={() => {
                     if (!isEditing) toggleCheck(prod.id);
@@ -548,12 +596,9 @@ export default function Separacao() {
                       <Square className="w-6 h-6 sm:w-7 sm:h-7 text-slate-600 stroke-[2.5]" />
                     )}
                   </div>
-                  
+
                   {/* No celular o nome ocupa a linha inteira e os números vêm
-                      embaixo. Antes, duas colunas numéricas fixas espremiam o
-                      nome em ~150px, e o aviso de falta — o dado mais
-                      importante para o conferente — ficava escondido justamente
-                      no aparelho onde ele trabalha. */}
+                      embaixo. */}
                   <div className={`flex-1 min-w-0 pr-2 ${isChecked && !isEditing ? 'opacity-60' : ''}`}>
                     <p className={`text-sm sm:text-base font-bold text-slate-800 break-words whitespace-normal leading-tight ${isChecked && !isEditing ? 'line-through' : ''}`}>
                       {formatItemName(prod.item?.nome)}
@@ -561,22 +606,13 @@ export default function Separacao() {
 
                     <div className="flex sm:hidden items-center flex-wrap gap-x-2 gap-y-0.5 mt-1">
                       <span className="text-xs text-slate-600">
-                        Sol <span className="font-bold text-slate-700">{qtSolicitada}</span> {unidadeDoItem(prod)}
+                        Sol <span className="font-bold text-slate-700">{formatarQtd(qtSolicitada)}</span> {unPedida}
                       </span>
                       <span className="text-slate-300">•</span>
                       <span className="text-xs text-slate-600">
-                        Sep <span className={`font-black ${isChecked ? 'text-slate-700' : 'text-teal-700'}`}>{qtSeparada}</span> {unidadeDoItem(prod)}
+                        Sep <span className={`font-black ${isChecked ? 'text-slate-700' : 'text-teal-700'}`}>{formatarQtd(qtSeparada)}</span> {unSep}
                       </span>
-                      {isRuptura && (
-                        <span className="text-[11px] font-bold text-orange-700 bg-orange-50 border border-orange-200 px-1.5 py-0.5 rounded">
-                          Falta {qtSolicitada - qtSeparada}
-                        </span>
-                      )}
-                      {isExcedente && (
-                        <span className="text-[11px] font-bold text-teal-700 bg-teal-50 border border-teal-200 px-1.5 py-0.5 rounded">
-                          A mais {qtSeparada - qtSolicitada}
-                        </span>
-                      )}
+                      {etiqueta}
                     </div>
                   </div>
 
@@ -584,27 +620,25 @@ export default function Separacao() {
                     <div className="w-20 text-right hidden sm:block">
                       <p className="text-[10px] text-slate-600 uppercase font-bold leading-none">Sol</p>
                       <p className="text-base font-semibold leading-tight text-slate-600">
-                        {qtSolicitada} <span className="text-xs font-medium text-slate-600 ml-0.5">{unidadeDoItem(prod)}</span>
+                        {formatarQtd(qtSolicitada)} <span className="text-xs font-medium text-slate-600 ml-0.5">{unPedida}</span>
                       </p>
                     </div>
 
                     <div className="w-20 text-right hidden sm:block">
                       <p className="text-[10px] text-slate-600 uppercase font-bold leading-none">Sep</p>
                       <p className={`text-base font-black leading-tight ${isChecked ? 'text-slate-700' : 'text-teal-700'}`}>
-                        {qtSeparada} <span className="text-xs font-medium opacity-60 ml-0.5">{unidadeDoItem(prod)}</span>
+                        {formatarQtd(qtSeparada)} <span className="text-xs font-medium opacity-60 ml-0.5">{unSep}</span>
                       </p>
                     </div>
 
-                    <div className="w-24 text-right hidden sm:block">
-                      {isRuptura && <span className="text-[11px] font-bold text-orange-600 bg-orange-50 px-1.5 py-0.5 rounded">Falta: {qtSolicitada - qtSeparada}</span>}
-                      {isExcedente && <span className="text-[11px] font-bold text-teal-600 bg-teal-50 px-1.5 py-0.5 rounded">A Mais: {qtSeparada - qtSolicitada}</span>}
-                    </div>
+                    <div className="w-28 text-right hidden sm:block">{etiqueta}</div>
 
                     <div className="w-9 sm:w-10 flex justify-end">
-                      <Button 
-                        variant="ghost" 
-                        size="icon" 
+                      <Button
+                        variant="ghost"
+                        size="icon"
                         className="h-7 w-7 text-slate-600 hover:text-teal-600 hover:bg-teal-50"
+                        title="Ajustar quantidade e unidade"
                         onClick={(e) => {
                           e.stopPropagation();
                           setEditingItemId(isEditing ? null : prod.id);
@@ -616,14 +650,12 @@ export default function Separacao() {
                   </div>
                 </div>
 
-                {/* Editor Inline Compacto */}
+                {/* Editor da linha: quantidade E unidade entregue. */}
                 {isEditing && (
                   <div className="bg-slate-100 border-t border-slate-200 px-4 py-2 flex items-center justify-end gap-2 sm:gap-3 flex-wrap" onClick={e => e.stopPropagation()}>
-                    <span className="text-xs font-bold text-slate-600 uppercase hidden sm:inline">Qtd Separada:</span>
+                    <span className="text-xs font-bold text-slate-600 uppercase hidden sm:inline">Entregue:</span>
 
-                    {/* Atalho para o caso mais comum de ajuste. Antes, marcar
-                        um item em falta exigia abrir o editor, zerar no "-"
-                        várias vezes ou digitar 0, salvar e depois marcar. */}
+                    {/* Atalho para o caso mais comum de ajuste. */}
                     <Button
                       variant="outline"
                       size="sm"
@@ -638,7 +670,7 @@ export default function Separacao() {
                         }
                         playSound('check');
                         try {
-                          await updateRequisicaoItem(prod.id, 0);
+                          await updateRequisicaoItem(prod.id, 0, unSep);
                         } catch (e) {
                           console.error("Auto-save failed:", e);
                         }
@@ -660,10 +692,11 @@ export default function Separacao() {
                       >
                         -
                       </Button>
-                      <Input 
-                        type="number" 
+                      <Input
+                        type="number"
                         step="any"
-                        className="w-16 sm:w-20 h-8 text-center font-bold bg-white" 
+                        inputMode="decimal"
+                        className="w-16 sm:w-20 h-8 text-center font-bold bg-white"
                         value={qtds[prod.id] === undefined ? "" : qtds[prod.id]}
                         onChange={(e) => {
                           const val = e.target.value;
@@ -683,15 +716,26 @@ export default function Separacao() {
                       </Button>
                     </div>
 
-                    <span className="text-xs font-bold text-slate-600 w-8">{unidadeDoItem(prod)}</span>
-                    <Button 
-                      size="sm" 
+                    {/* Pedido em UN, entregue em KG: é aqui que se troca. */}
+                    <select
+                      value={unSep}
+                      onChange={(e) => setUnids({ ...unids, [prod.id]: e.target.value })}
+                      aria-label={`Unidade entregue de ${formatItemName(prod.item?.nome)}`}
+                      className="h-8 w-20 shrink-0 rounded-md border border-slate-300 bg-white px-2 text-sm font-bold text-slate-700 focus:outline-none focus:ring-2 focus:ring-teal-500"
+                    >
+                      {opcoesDeUnidade(prod.item, unPedida, unSep).map((u) => (
+                        <option key={u} value={u}>{u}</option>
+                      ))}
+                    </select>
+
+                    <Button
+                      size="sm"
                       className="h-8 bg-teal-600 hover:bg-teal-700 font-bold px-3 sm:px-4 shrink-0"
                       onClick={async () => {
                         setEditingItemId(null);
                         if (isChecked) {
                           try {
-                            await updateRequisicaoItem(prod.id, qtds[prod.id]);
+                            await updateRequisicaoItem(prod.id, qtds[prod.id], unSep);
                           } catch (e) {
                             console.error("Auto-save failed:", e);
                           }
@@ -701,19 +745,25 @@ export default function Separacao() {
                       <Save className="w-4 h-4 sm:mr-1" />
                       <span className="hidden sm:inline">Salvar</span>
                     </Button>
+
+                    {unSep !== unPedida && (
+                      <p className="w-full text-right text-[11px] text-sky-800">
+                        Pedido em {unPedida}, entregue em {unSep}: conta como atendido, e o que fica registrado é o entregue.
+                      </p>
+                    )}
                   </div>
                 )}
               </div>
             );
           })}
         </div>
-        
+
         {/* Paginação */}
         {totalPages > 1 && (
           <div className="flex items-center justify-between px-4 py-2 bg-slate-50 border-t shrink-0">
-            <Button 
-              variant="outline" 
-              size="sm" 
+            <Button
+              variant="outline"
+              size="sm"
               onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
               disabled={currentPage === 1}
               className="h-8 text-xs font-bold"
@@ -721,9 +771,9 @@ export default function Separacao() {
               Anterior
             </Button>
             <span className="text-xs font-bold text-slate-700">Página {currentPage} de {totalPages}</span>
-            <Button 
-              variant="outline" 
-              size="sm" 
+            <Button
+              variant="outline"
+              size="sm"
               onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
               disabled={currentPage === totalPages}
               className="h-8 text-xs font-bold"
@@ -734,26 +784,20 @@ export default function Separacao() {
         )}
       </div>
 
-      {/* Mobile Progress & Fixer Footer */}
-      <div className="absolute bottom-0 left-0 right-0 w-full bg-white border-t p-3 sm:p-4 shadow-[0_-5px_15px_rgba(0,0,0,0.1)] z-40 rounded-b-xl">
-        <div className="flex sm:hidden justify-between items-center mb-3 px-1">
-           <span className="text-xs font-bold text-slate-700 uppercase">Itens Separados</span>
-           <span className="text-sm font-black text-teal-700">{checkedItems.size} <span className="text-slate-600 font-normal">/ {totalItems}</span></span>
-        </div>
-
-        {/* Com paginação, o item que falta conferir pode estar em outra página
-            e o botão cinza não dizia o porquê. */}
+      {/* Rodapé fixo EMBAIXO da lista (não por cima dela). */}
+      <div className="shrink-0 w-full bg-white border-t p-3 sm:p-4 shadow-[0_-5px_15px_rgba(0,0,0,0.08)] rounded-b-xl">
+        {/* Com paginação, o item que falta conferir pode estar em outra página. */}
         {!isAllChecked && totalItems > 0 && (
           <button
             type="button"
             onClick={irParaPrimeiroPendente}
-            className="w-full mb-2 text-xs font-bold text-amber-800 bg-amber-50 border border-amber-200 rounded-lg py-2 px-3 hover:bg-amber-100 transition-colors flex items-center justify-center gap-1.5"
+            className="w-full mb-2 text-xs font-bold text-amber-800 bg-amber-50 border border-amber-200 rounded-lg py-1.5 px-3 hover:bg-amber-100 transition-colors flex items-center justify-center gap-1.5"
           >
-            Faltam {totalItems - checkedItems.size} {totalItems - checkedItems.size === 1 ? "item" : "itens"} para conferir
+            Faltam {totalItems - checkedItems.size} de {totalItems} para conferir
             {totalPages > 1 && <span className="font-medium opacity-80">— tocar para ir até o próximo</span>}
           </button>
         )}
-        <div className="flex flex-col sm:flex-row gap-2 sm:gap-3">
+        <div className="flex flex-row gap-2 sm:gap-3">
           <Button
             type="button"
             variant="destructive"
@@ -762,16 +806,16 @@ export default function Separacao() {
               e.stopPropagation();
               handleCancelar();
             }}
-            className="w-full sm:w-auto h-12 sm:h-14 px-4 sm:px-6 text-sm sm:text-base font-bold rounded-xl shadow-md"
+            className="shrink-0 h-12 sm:h-14 px-4 sm:px-6 text-sm sm:text-base font-bold rounded-xl shadow-md"
           >
             Cancelar
           </Button>
           <Button
             onClick={prepareConference}
             disabled={!isAllChecked || isFinishing || totalItems === 0}
-            className={`w-full sm:flex-1 h-12 sm:h-14 text-base sm:text-lg font-black rounded-xl transition-all ${isAllChecked ? 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-lg' : 'bg-slate-200 text-slate-400'}`}
+            className={`flex-1 min-w-0 h-12 sm:h-14 text-sm sm:text-lg font-black rounded-xl transition-all ${isAllChecked ? 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-lg' : 'bg-slate-200 text-slate-500'}`}
           >
-            {isFinishing ? "FINALIZANDO..." : "FINALIZAR REQUISIÇÃO"}
+            {isFinishing ? "FINALIZANDO..." : isAllChecked ? "FINALIZAR REQUISIÇÃO" : `${checkedItems.size} / ${totalItems} SEPARADOS`}
           </Button>
         </div>
       </div>
@@ -809,7 +853,7 @@ export default function Separacao() {
                             {formatItemName(item.item?.nome)}
                           </label>
                         </div>
-                        <span className="font-bold text-teal-900 text-base landscape:text-sm">{qtSeparada} {unidadeDoItem(item)}</span>
+                        <span className="font-bold text-teal-900 text-base landscape:text-sm whitespace-nowrap">{formatarQtd(qtSeparada)} {unidadeSeparadaDe(item)}</span>
                       </div>
                     );
                   })}
@@ -1031,9 +1075,14 @@ export default function Separacao() {
                       <div 
                         key={item.id}
                         className="px-3 py-2 hover:bg-teal-50 hover:text-teal-900 cursor-pointer rounded-md text-sm font-medium border border-transparent transition-colors"
-                        onClick={() => setSelectedNewItem(item)}
+                        onClick={() => {
+                          setSelectedNewItem(item);
+                          const unidades = unidadesDoItem(item);
+                          setNewItemUnidade(unidades.length === 1 ? unidades[0] : "");
+                        }}
                       >
                         {item.nome}
+                        <span className="ml-2 text-xs font-normal text-slate-500">{unidadesDoItem(item).join(" · ")}</span>
                       </div>
                     ))
                   )}
@@ -1055,9 +1104,21 @@ export default function Separacao() {
                       onChange={e => setNewItemQtd(e.target.value === '' ? '' : Number(e.target.value))}
                       className="w-24 h-12 text-center text-xl font-black"
                       min={1}
+                      step="any"
+                      inputMode="decimal"
                       autoFocus
                     />
-                    <span className="text-slate-700 font-bold">{selectedNewItem.unidade}</span>
+                    <select
+                      value={newItemUnidade}
+                      onChange={(e) => setNewItemUnidade(e.target.value)}
+                      aria-label="Unidade do item adicionado"
+                      className="h-12 w-24 rounded-md border border-slate-300 bg-white px-2 text-base font-bold text-slate-700 focus:outline-none focus:ring-2 focus:ring-teal-500"
+                    >
+                      <option value="" disabled>Unid.</option>
+                      {unidadesDoItem(selectedNewItem).map((u) => (
+                        <option key={u} value={u}>{u}</option>
+                      ))}
+                    </select>
                   </div>
                 </div>
               </div>
@@ -1078,7 +1139,7 @@ export default function Separacao() {
               <Button 
                 className="bg-teal-600 hover:bg-teal-700" 
                 onClick={handleAddItemToReq}
-                disabled={isAddingItem || !newItemQtd || Number(newItemQtd) <= 0}
+                disabled={isAddingItem || !newItemQtd || Number(newItemQtd) <= 0 || !newItemUnidade}
               >
                 {isAddingItem ? "Adicionando..." : "Adicionar à Separação"}
               </Button>

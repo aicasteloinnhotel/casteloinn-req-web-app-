@@ -7,7 +7,7 @@
 
 export const APP = {
   nome: "Sistema de Requisições",
-  versao: "1.0",
+  versao: "1.1",
   desenvolvedor: "Nilton Junio Evangelista de Melo",
   descricao:
     "Substitui o pedido de material em papel: os setores fazem a requisição pelo celular, o almoxarifado separa, confere e entrega com assinatura na tela, e o que faltou vira requisição complementar e lista de compras automaticamente.",
@@ -17,7 +17,11 @@ export const APP = {
  * Dia em que esta versão foi gerada. Preenchido sozinho a cada deploy no
  * Netlify (vite.config.ts), para saber que versão cada aparelho está usando.
  */
-export const DATA_DA_PUBLICACAO = new Date(__DATA_DA_PUBLICACAO__);
+// O "typeof" protege a ordem dos envios ao GitHub: se a pasta src subir antes
+// do vite.config.ts novo, o build sai sem a data e isto não derruba o app.
+export const DATA_DA_PUBLICACAO = new Date(
+  typeof __DATA_DA_PUBLICACAO__ !== "undefined" ? __DATA_DA_PUBLICACAO__ : Date.now(),
+);
 
 export const HOTEL = {
   nome: "Castelo Inn Hotel",

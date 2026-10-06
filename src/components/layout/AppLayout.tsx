@@ -3,6 +3,7 @@ import { Outlet, Navigate, Link, useLocation, useNavigate } from "react-router-d
 import { useInstallApp } from "@/hooks/useInstallApp";
 import { useAvisosEmTempoReal } from "@/hooks/useAvisosEmTempoReal";
 import { AtivarAvisos } from "@/components/AtivarAvisos";
+import { FaixaPausa } from "@/components/PausaInventario";
 import { BotaoInstalar, ConviteInstalacao } from "@/components/ConviteInstalacao";
 import { Download } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
@@ -47,9 +48,13 @@ export default function AppLayout() {
   const telaDeTrabalho = location.pathname.endsWith("/separacao");
   const faixaDoTopo = telaDeTrabalho
     ? null
-    : conviteVisivel
-      ? <ConviteInstalacao className="mb-4" />
-      : <AtivarAvisos />;
+    : (
+      <>
+        {/* A pausa para inventário vem antes de tudo: muda o que a pessoa pode fazer. */}
+        <FaixaPausa />
+        {conviteVisivel ? <ConviteInstalacao className="mb-4" /> : <AtivarAvisos />}
+      </>
+    );
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [isCollapsed, setIsCollapsed] = useState(true); // Start collapsed by default for better space
   const timeoutRef = useRef<NodeJS.Timeout | null>(null);

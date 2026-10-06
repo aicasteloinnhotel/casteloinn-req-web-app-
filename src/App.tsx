@@ -1,6 +1,7 @@
 import React, { useEffect, Suspense, lazy } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider } from './contexts/AuthContext';
+import { BloqueioProvider } from './contexts/BloqueioContext';
 import AppLayout from './components/layout/AppLayout';
 import Login from './pages/Login';
 import { Toaster } from "@/components/ui/sonner";
@@ -51,6 +52,7 @@ export default function App() {
 
   return (
     <AuthProvider>
+      <BloqueioProvider>
       <BrowserRouter>
         <Toaster position="top-right" richColors />
         <Routes>
@@ -80,6 +82,7 @@ export default function App() {
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </BrowserRouter>
+      </BloqueioProvider>
     </AuthProvider>
   );
 }

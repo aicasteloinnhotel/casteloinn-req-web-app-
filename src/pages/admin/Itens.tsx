@@ -25,6 +25,7 @@ import { Plus, Edit2, CheckCircle2, XCircle, Trash2, Upload, BarChart3, Package,
 import { toast } from "@/lib/toast";
 import { hasSupabaseKeys } from "@/lib/supabase";
 import { contemTexto, dataInputParaLocal, formatItemName, UNIDADE_PADRAO } from "@/lib/utils";
+import { rotuloUnidade, UNIDADES_CADASTRO, unidadesDoItem } from "@/lib/unidades";
 import { calcularSaidas } from "@/lib/saidas";
 import { CampoBusca } from "@/components/CampoBusca";
 import {
@@ -33,22 +34,12 @@ import {
 } from "@/lib/estilos";
 import { endOfDay, format, startOfDay } from "date-fns";
 
-/** Unidades oferecidas no cadastro. Uma unidade vinda de planilha que não esteja
- *  aqui continua aparecendo no seletor, para não ser trocada sem querer. */
-const UNIDADES_CADASTRO: { valor: string; rotulo: string }[] = [
-  { valor: "UN", rotulo: "Unidade (UN)" },
-  { valor: "CX", rotulo: "Caixa (CX)" },
-  { valor: "PCT", rotulo: "Pacote (PCT)" },
-  { valor: "KG", rotulo: "Quilo (KG)" },
-  { valor: "LT", rotulo: "Litro (LT)" },
-  { valor: "FR", rotulo: "Frasco (FR)" },
-  { valor: "RL", rotulo: "Rolo (RL)" },
-  { valor: "FD", rotulo: "Fardo (FD)" },
-  { valor: "BD", rotulo: "Balde (BD)" },
-  { valor: "CART", rotulo: "Cartela (CART)" },
-  { valor: "GL", rotulo: "Galão (GL)" },
-  { valor: "GF", rotulo: "Garrafa (GF)" },
-];
+/** Unidades de uma célula da planilha: "UN", "UN/KG", "UN|KG" ou "UN+KG". */
+const unidadesDaPlanilha = (celula?: string): string[] =>
+  (celula || "")
+    .split(/[\/|+]/)
+    .map((u) => u.trim().toUpperCase())
+    .filter((u, i, todas) => u && todas.indexOf(u) === i);
 
 /**
  * Lê a planilha respeitando a codificação. O Excel no Windows salva "CSV" em
@@ -79,9 +70,9 @@ export default function Itens() {
   const [salvando, setSalvando] = useState(false);
 
   const [editId, setEditId] = useState("");
-  const [form, setForm] = useState({
+  const [form, setForm] = useState<{ nome: string; unidades: string[]; ativo: boolean }>({
     nome: "",
-    unidade: UNIDADE_PADRAO,
+    unidades: [],
     ativo: true,
   });
 
@@ -121,10 +112,10 @@ export default function Itens() {
   const handleOpen = (item?: Item) => {
     if (item) {
       setEditId(item.id);
-      setForm({ nome: item.nome, unidade: item.unidade || UNIDADE_PADRAO, ativo: item.ativo });
+      setForm({ nome: item.nome, unidades: unidadesDoItem(item), ativo: item.ativo });
     } else {
       setEditId("");
-      setForm({ nome: "", unidade: UNIDADE_PADRAO, ativo: true });
+      setForm({ nome: "", unidades: [], ativo: true });
     }
     setOpen(true);
   };
@@ -146,9 +137,20 @@ export default function Itens() {
 
     // Espaço sobrando no nome virava "outro" item para quem lê, mas o mesmo
     // para o banco — e o erro que voltava era técnico.
-    const dados = { ...form, nome: form.nome.trim(), unidade: form.unidade.trim().toUpperCase() };
+    const unidades = form.unidades.map((u) => u.trim().toUpperCase()).filter(Boolean);
+    const dados = {
+      nome: form.nome.trim(),
+      ativo: form.ativo,
+      // A primeira marcada é a principal (usada na lista de reposição).
+      unidade: unidades[0],
+      unidades,
+    };
     if (!dados.nome) {
       toast.error("Informe o nome do item.");
+      return;
+    }
+    if (unidades.length === 0) {
+      toast.error("Marque pelo menos uma unidade em que o item pode ser pedido.");
       return;
     }
 
@@ -295,40 +297,70 @@ export default function Itens() {
         try {
           // Catálogo atual, para não recadastrar o que já existe.
           const existentes = await getItens();
-          const jaCadastrados = new Set(
-            existentes.map((i) => i.nome.trim().toLowerCase()),
-          );
+          const porNome = new Map(existentes.map((i) => [i.nome.trim().toLowerCase(), i]));
+          const vistosNaPlanilha = new Set<string>();
 
-          const aInserir: { nome: string; unidade: string; ativo: boolean }[] = [];
+          const aInserir: { nome: string; unidade: string; unidades: string[]; ativo: boolean }[] = [];
+          // Item que já existe e a planilha traz unidade nova: a unidade é
+          // ACRESCENTADA (nunca removida). É o jeito rápido de dar "UN/KG" para
+          // centenas de itens de uma vez.
+          const aCompletar: { id: string; unidade: string; unidades: string[] }[] = [];
           let ignoradas = 0;
 
           for (let i = startIndex; i < data.length; i++) {
             const row = data[i];
             const nome = row[0]?.trim();
-            // Maiúscula sempre: "cx" e "CX" eram duas unidades diferentes no
-            // seletor do pedido.
-            const unidade = (row[1]?.trim() || UNIDADE_PADRAO).toUpperCase();
+            // Maiúscula sempre: "cx" e "CX" eram duas unidades diferentes.
+            const daPlanilha = unidadesDaPlanilha(row[1]);
 
             if (!nome) {
               ignoradas++;
               continue;
             }
 
-            // Duplicada na planilha ou já existente no catálogo.
             const chave = nome.toLowerCase();
-            if (jaCadastrados.has(chave)) {
+            if (vistosNaPlanilha.has(chave)) {
               ignoradas++;
               continue;
             }
-            jaCadastrados.add(chave);
+            vistosNaPlanilha.add(chave);
 
-            aInserir.push({ nome, unidade, ativo: true });
+            const existente = porNome.get(chave);
+            if (existente) {
+              const atuais = unidadesDoItem(existente);
+              const novas = daPlanilha.filter((u) => !atuais.includes(u));
+              if (novas.length > 0) {
+                aCompletar.push({ id: existente.id, unidade: atuais[0], unidades: [...atuais, ...novas] });
+              } else {
+                ignoradas++;
+              }
+              continue;
+            }
+
+            const unidades = daPlanilha.length > 0 ? daPlanilha : [UNIDADE_PADRAO];
+            aInserir.push({ nome, unidade: unidades[0], unidades, ativo: true });
+          }
+
+          let completados = 0;
+          for (const item of aCompletar) {
+            try {
+              await updateItem(item.id, { unidade: item.unidade, unidades: item.unidades });
+              completados++;
+            } catch (erro) {
+              console.error("Erro ao acrescentar unidades:", item.id, erro);
+            }
+          }
+          if (completados > 0) {
+            toast.success(`${completados} item(ns) já cadastrado(s) ganharam unidades novas.`);
+            if (aInserir.length === 0) carregar();
           }
 
           if (aInserir.length === 0) {
-            toast.warning(
-              `Nenhum item novo na planilha (${ignoradas} linha(s) vazia(s) ou já cadastrada(s)).`,
-            );
+            if (completados === 0) {
+              toast.warning(
+                `Nada novo na planilha (${ignoradas} linha(s) vazia(s) ou já cadastrada(s) com as mesmas unidades).`,
+              );
+            }
             setIsImporting(false);
             if (fileInputRef.current) fileInputRef.current.value = "";
             return;
@@ -434,12 +466,20 @@ export default function Itens() {
     return ordenados;
   }, [itensFiltrados, sortConfig]);
 
-  // Unidade de um item importado por planilha que não esteja na lista padrão
-  // entra como opção extra — senão o seletor mostrava "UN" e trocava a unidade
-  // ao salvar a edição do nome.
-  const opcoesUnidade = UNIDADES_CADASTRO.some((u) => u.valor === form.unidade)
-    ? UNIDADES_CADASTRO
-    : [{ valor: form.unidade, rotulo: form.unidade }, ...UNIDADES_CADASTRO];
+  // Unidade vinda de planilha que não esteja na lista padrão entra como opção
+  // extra — senão ela sumiria ao salvar a edição do nome.
+  const opcoesUnidade = [
+    ...UNIDADES_CADASTRO,
+    ...form.unidades
+      .filter((u) => !UNIDADES_CADASTRO.some((x) => x.valor === u))
+      .map((u) => ({ valor: u, rotulo: u })),
+  ];
+
+  const alternarUnidade = (u: string) =>
+    setForm((f) => ({
+      ...f,
+      unidades: f.unidades.includes(u) ? f.unidades.filter((x) => x !== u) : [...f.unidades, u],
+    }));
 
   const temFiltroDeData = !!(rankingDataInicio || rankingDataFim);
 
@@ -601,7 +641,7 @@ export default function Itens() {
                 variant="outline"
                 onClick={handleImportClick}
                 disabled={isImporting}
-                title="Importar CSV (coluna A: nome, coluna B: unidade)"
+                title="Importar CSV (coluna A: nome; coluna B: unidades, ex.: UN/KG). Item que já existe ganha as unidades novas."
                 className={`${BOTAO_SECUNDARIO} shrink-0`}
               >
                 <Upload className="h-4 w-4 sm:mr-2 shrink-0" />
@@ -676,7 +716,7 @@ export default function Itens() {
                           {i.nome}
                         </TableCell>
                         <TableCell className="text-slate-600 font-medium text-xs sm:text-sm">
-                          {i.unidade}
+                          {unidadesDoItem(i).join(", ")}
                         </TableCell>
                         <TableCell className="hidden md:table-cell">
                           {i.ativo ? (
@@ -760,19 +800,41 @@ export default function Itens() {
               />
             </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="item-unidade">Unidade de Medida</Label>
-              <select
-                id="item-unidade"
-                className={`${SELETOR} w-full`}
-                value={form.unidade}
-                onChange={(e) => setForm({ ...form, unidade: e.target.value })}
-              >
-                {opcoesUnidade.map((u) => (
-                  <option key={u.valor} value={u.valor}>{u.rotulo}</option>
-                ))}
-              </select>
-            </div>
+            {/* Várias unidades por item: é o que aparece para escolher no
+                pedido (ex.: carne em UN ou KG). A primeira marcada é a principal. */}
+            <fieldset className="space-y-2">
+              <legend className="text-sm font-medium leading-none">
+                Unidades em que pode ser pedido <span className="text-red-600">*</span>
+              </legend>
+              <p className="text-xs text-slate-500">
+                Toque para marcar uma ou mais.
+                {form.unidades.length > 0 && (
+                  <> Marcadas: <strong className="text-slate-700">{form.unidades.join(", ")}</strong></>
+                )}
+              </p>
+              <div className="grid grid-cols-3 gap-1.5 sm:grid-cols-4">
+                {opcoesUnidade.map((u) => {
+                  const marcada = form.unidades.includes(u.valor);
+                  return (
+                    <button
+                      key={u.valor}
+                      type="button"
+                      role="checkbox"
+                      aria-checked={marcada}
+                      onClick={() => alternarUnidade(u.valor)}
+                      className={`flex h-12 flex-col items-center justify-center rounded-lg border text-xs leading-tight transition-colors ${
+                        marcada
+                          ? "border-teal-600 bg-teal-600 text-white"
+                          : "border-slate-200 bg-white text-slate-700 hover:border-teal-300 hover:bg-teal-50"
+                      }`}
+                    >
+                      <span className="text-sm font-black">{u.valor}</span>
+                      <span className={marcada ? "text-teal-50" : "text-slate-500"}>{rotuloUnidade(u.valor)}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </fieldset>
             <Button
               type="submit"
               disabled={salvando}

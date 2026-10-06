@@ -21,6 +21,8 @@ import {
 import { descreverQuantidades, formatItemName } from "@/lib/utils";
 import { calcularSaidas } from "@/lib/saidas";
 import { StatusBadge } from "@/components/StatusBadge";
+import { BotaoSuspenderRequisicoes } from "@/components/PausaInventario";
+import { useBloqueio } from "@/contexts/BloqueioContext";
 import { Calendar, Users, Hourglass, ShoppingCart, BarChart3, ClipboardList, Printer, AlertTriangle, Truck } from "lucide-react";
 
 
@@ -51,7 +53,8 @@ export default function DashboardAlmoxarifado({
   onRefresh,
 }: Props) {
   const navigate = useNavigate();
-  
+  const { bloqueio } = useBloqueio();
+
   const [listaReposicao, setListaReposicao] = useState<ItemReposicao[]>([]);
 
   const fetchListaReposicao = useCallback(async () => {
@@ -266,7 +269,14 @@ export default function DashboardAlmoxarifado({
 
   return (
     <div className="flex flex-col h-auto lg:h-full w-full gap-4 bg-slate-50 overflow-y-auto lg:overflow-hidden animate-in fade-in lg:pb-0 pb-4">
-      
+
+      {/* Pausa para inventário. Ligada, quem libera é a faixa do topo. */}
+      {!bloqueio.ativo && (
+        <div className="flex shrink-0 items-center justify-end">
+          <BotaoSuspenderRequisicoes />
+        </div>
+      )}
+
       {/* HEADER ROW (CHART) */}
       <Card className="shrink-0 h-[260px] lg:h-[32%] shadow-xl shadow-slate-200/60 border-slate-200/60 border-slate-200 relative overflow-hidden p-0">
         <div className="absolute top-0 right-0 z-10">

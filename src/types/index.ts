@@ -13,7 +13,10 @@ export interface Usuario {
 export interface Item {
   id: string;
   nome: string;
+  /** Unidade principal (sempre a primeira de `unidades`). */
   unidade: string;
+  /** Unidades em que o material pode ser pedido (ex.: carne = UN e KG). */
+  unidades?: string[] | null;
   ativo: boolean;
   created_at: string;
 }
@@ -55,9 +58,19 @@ export interface RequisicaoItem {
   requisicao_id: string;
   item_id: string;
   quantidade: number;
-  quantidade_separada?: number;
+  quantidade_separada?: number | null;
   /** Unidade escolhida no pedido. Quando vazia, vale a do catálogo do item. */
   unidade?: string | null;
+  /** Unidade em que foi entregue. Vazia = a mesma do pedido. */
+  unidade_separada?: string | null;
+}
+
+/** Pausa para inventário: com ela ligada, ninguém cria requisição nova. */
+export interface BloqueioRequisicoes {
+  ativo: boolean;
+  motivo?: string | null;
+  alterado_por?: string | null;
+  alterado_em?: string | null;
 }
 
 export interface RequisicaoItemComDetalhes extends RequisicaoItem {

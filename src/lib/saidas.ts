@@ -1,5 +1,6 @@
 import type { Item, Requisicao } from "@/types";
 import { formatItemName, quantidadeEfetiva, unidadeDoItem, UNIDADE_PADRAO } from "@/lib/utils";
+import { unidadeEntregue } from "@/lib/unidades";
 
 const ENTREGUE = new Set(["FINALIZADA", "RUPTURA_PARCIAL", "RUPTURA_TOTAL"]);
 
@@ -53,7 +54,11 @@ export function calcularSaidas(
     for (const linha of r.itens || []) {
       const item_id = linha.item?.id || linha.item_id;
       if (!item_id) continue;
-      const unidade = unidadeDoItem(linha).toUpperCase();
+      // Entregue conta na unidade em que SAIU (pedido 5 UN, entregue 6,2 KG
+      // soma 6,2 KG); em aberto, na unidade do pedido.
+      const unidade = (
+        entregue && linha.quantidade_separada != null ? unidadeEntregue(linha) : unidadeDoItem(linha)
+      ).toUpperCase();
       const k = chave(item_id, unidade);
       const atual = saidas.get(k) || {
         item_id,

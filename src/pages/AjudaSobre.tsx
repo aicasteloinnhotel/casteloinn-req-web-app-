@@ -26,6 +26,7 @@ import {
   TriangleAlert,
   Users,
   Eye,
+  PauseCircle,
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useInstallApp } from "@/hooks/useInstallApp";
@@ -244,8 +245,9 @@ export default function AjudaSobre() {
                   para ver todos.
                 </li>
                 <li>
-                  Escolha a <strong>quantidade</strong> e a <strong>unidade</strong>. Ela vem em UN;
-                  troque se for caixa, pacote, litro…
+                  Escolha a <strong>quantidade</strong> e a <strong>unidade</strong> (obrigatória).
+                  Só aparecem as unidades cadastradas para aquele material — por exemplo, carne em
+                  UN ou KG.
                 </li>
                 <li>Toque em <strong>Adicionar ao Pedido</strong>. Repita para cada material.</li>
                 <li>
@@ -255,7 +257,8 @@ export default function AjudaSobre() {
               </Passos>
               <Dica>
                 Se sair da tela no meio do pedido, os itens ficam guardados neste aparelho até você
-                voltar e enviar.
+                voltar e enviar. Se aparecer “Novas requisições suspensas”, o almoxarifado está em
+                inventário: espere liberar.
               </Dica>
             </Topico>
 
@@ -365,15 +368,19 @@ export default function AjudaSobre() {
                       é avisado.
                     </li>
                     <li>
-                      Toque em cada item para marcar como separado. O lápis ajusta a quantidade;{" "}
-                      <strong>Em falta</strong> zera o item.
+                      Toque em cada item para marcar como separado. O lápis ajusta a quantidade e a{" "}
+                      <strong>unidade entregue</strong> (pedido 5 UN de carne, entregue 6,2 KG);{" "}
+                      <strong>Em falta</strong> zera o item. O que fica registrado é o entregue.
                     </li>
                     <li><strong>+ Item</strong> inclui um material que não estava no pedido.</li>
                     <li>
                       <strong>Finalizar Requisição</strong> → confira os itens com o solicitante →
                       termo e assinatura dele → assinatura do almoxarifado.
                     </li>
-                    <li>No fim, imprima ou exporte o PDF.</li>
+                    <li>
+                      Pronto: aparece “finalizada com sucesso”. Lançar no TOTVS e imprimir ficam para
+                      depois, quando der tempo (veja abaixo).
+                    </li>
                   </Passos>
                   <Dica>
                     Só um operador separa cada pedido por vez. Para desistir, use{" "}
@@ -393,6 +400,11 @@ export default function AjudaSobre() {
                     Quando chegar, abra a complementar — ou toque em <strong>Resolver</strong> na
                     Lista de Reposição — e separe normalmente.
                   </p>
+                  <p>
+                    Chegou só parte? Separe o que tem e finalize: a complementar fecha com o que
+                    foi entregue (e pode ser lançada no TOTVS), e o sistema cria outra só com o que
+                    ainda falta. Urgência e “já pedido” passam junto para a nova.
+                  </p>
                 </Topico>
 
                 <Topico icone={<ClipboardList />} titulo="Lançar no TOTVS">
@@ -404,6 +416,10 @@ export default function AjudaSobre() {
                     </li>
                     <li><strong>Copiar lista</strong> copia os itens para colar onde precisar.</li>
                     <li>Depois de lançar lá, toque em <strong>Marcar como lançada</strong>.</li>
+                    <li>
+                      Só então o app libera o <strong>Imprimir</strong>. O comprovante sai com o nome
+                      de quem lançou e de quem imprimiu.
+                    </li>
                   </Passos>
                   <p>
                     O filtro <strong>A lançar</strong>, na lista de Requisições, mostra o que ainda
@@ -427,13 +443,30 @@ export default function AjudaSobre() {
 
                 <Topico icone={<Package />} titulo="Cadastro de itens">
                   <p>
-                    Em <strong>Controle de Itens</strong>, cadastre um a um em{" "}
-                    <strong>Novo item</strong> ou importe uma planilha em{" "}
-                    <strong>Importar CSV</strong> (coluna A: nome; coluna B: unidade).
+                    Em <strong>Controle de Itens</strong>, cadastre em <strong>Novo item</strong> e
+                    marque <strong>todas as unidades</strong> em que o material pode ser pedido (carne:
+                    UN e KG). Só essas aparecem para quem pede.
+                  </p>
+                  <p>
+                    Muitos de uma vez: <strong>Importar CSV</strong> com coluna A = nome e coluna B =
+                    unidades separadas por barra (ex.: <code>UN/KG</code>). Item que já existe ganha as
+                    unidades novas; nenhuma é removida.
                   </p>
                   <p>
                     Material que já saiu em alguma requisição não é apagado: é arquivado e continua
                     aparecendo no histórico.
+                  </p>
+                </Topico>
+
+                <Topico icone={<PauseCircle />} titulo="Pausar requisições (inventário)">
+                  <p>
+                    No Início, toque em <strong>Pausar requisições</strong> e confirme. Enquanto
+                    estiver pausado, ninguém cria requisição nova — os pedidos que já existem
+                    continuam: dá para separar, entregar e lançar.
+                  </p>
+                  <p>
+                    Todos veem uma faixa amarela no topo. Para voltar ao normal, toque em{" "}
+                    <strong>Liberar requisições</strong> nessa faixa.
                   </p>
                 </Topico>
 
