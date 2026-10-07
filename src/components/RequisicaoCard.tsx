@@ -1,16 +1,17 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Card, CardContent } from "@/components/ui/card";
 import { format } from "date-fns";
-import { ChevronRight, Lock, ClipboardCheck, ClipboardList, Eye } from "lucide-react";
+import { ChevronRight, Lock, ClipboardCheck, ClipboardList, Eye, Search } from "lucide-react";
 import { PreviaRequisicao } from "@/components/PreviaRequisicao";
 import { useAuth } from "@/contexts/AuthContext";
 import { Requisicao } from "@/types";
 import { isLockAtivo } from "@/services/api";
 import { StatusBadge } from "@/components/StatusBadge";
-import { precisaLancar } from "@/lib/utils";
+import { contemTexto, foiEntregue, formatItemName, precisaLancar, unidadeDoItem } from "@/lib/utils";
+import { formatarQtd, unidadeEntregue } from "@/lib/unidades";
 import { useNavigate } from "react-router-dom";
 
-export const RequisicaoCard = React.memo(({ req }: { req: Requisicao }) => {
+export const RequisicaoCard = React.memo(({ req, buscaItem }: { req: Requisicao; buscaItem?: string }) => {
   const navigate = useNavigate();
   const { user } = useAuth();
   // A trava expira: sem checar o tempo, uma separação abandonada deixava o
@@ -33,6 +34,22 @@ export const RequisicaoCard = React.memo(({ req }: { req: Requisicao }) => {
       <ClipboardList className="w-3 h-3 shrink-0" /> A LANÇAR
     </span>
   );
+
+  // Busca por item na lista: quais linhas desta requisição bateram, para o
+  // cartão dizer na hora "tem 2 GL de detergente", sem abrir.
+  const encontrados = useMemo(
+    () =>
+      buscaItem
+        ? (req.itens || []).filter((l) => contemTexto(formatItemName(l.item?.nome), buscaItem))
+        : [],
+    [req.itens, buscaItem]
+  );
+  const entregue = foiEntregue(req.status);
+  const qtdDaLinha = (l: NonNullable<Requisicao["itens"]>[number]) => {
+    if (!entregue) return `${formatarQtd(l.quantidade)} ${unidadeDoItem(l)}`;
+    const sep = Number(l.quantidade_separada ?? 0);
+    return sep > 0 ? `entregue ${formatarQtd(sep)} ${unidadeEntregue(l)}` : "não entregue";
+  };
 
   // Prévia sem sair da lista. O clique no olho não pode chegar ao cartão,
   // que abriria a requisição.
@@ -167,6 +184,25 @@ export const RequisicaoCard = React.memo(({ req }: { req: Requisicao }) => {
           <ChevronRight className="w-5 h-5" />
         </div>
       </CardContent>
+
+      {/* O que a busca por item achou aqui. -mt-4 anula o espaçamento do
+          cartão: fica colado ao conteúdo, como parte dele. */}
+      {encontrados.length > 0 && (
+        <div className="-mt-4 px-4 lg:px-5 flex flex-wrap items-center gap-1.5">
+          <Search className="w-3.5 h-3.5 text-amber-700 shrink-0" />
+          {encontrados.slice(0, 3).map((l) => (
+            <span
+              key={l.id}
+              className="min-w-0 max-w-full text-[11px] font-semibold text-amber-900 bg-amber-50 border border-amber-200 rounded-md px-2 py-0.5 [overflow-wrap:anywhere]"
+            >
+              {formatItemName(l.item?.nome)} · <span className="font-black">{qtdDaLinha(l)}</span>
+            </span>
+          ))}
+          {encontrados.length > 3 && (
+            <span className="text-[11px] font-bold text-slate-500">+{encontrados.length - 3}</span>
+          )}
+        </div>
+      )}
     </Card>
 
     {previa && (
@@ -176,6 +212,7 @@ export const RequisicaoCard = React.memo(({ req }: { req: Requisicao }) => {
         aoFechar={() => setPrevia(false)}
         emAtendimento={isLockedByOther}
         pilulas={pilulaLancamento}
+        destacar={buscaItem}
       />
     )}
     </>

@@ -12,11 +12,8 @@ import {
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/StatusBadge";
 import { Requisicao } from "@/types";
-import { formatItemName, unidadeDoItem } from "@/lib/utils";
+import { contemTexto, foiEntregue, formatItemName, unidadeDoItem } from "@/lib/utils";
 import { avaliarSeparacao, formatarQtd, unidadeEntregue } from "@/lib/unidades";
-
-/** Status em que a entrega já aconteceu: só aí vale mostrar o entregue. */
-const ENTREGUE = ["FINALIZADA", "RUPTURA_PARCIAL", "RUPTURA_TOTAL"];
 
 /**
  * Prévia rápida da requisição, aberta pelo olho no cartão da lista: quem, de
@@ -29,6 +26,7 @@ export function PreviaRequisicao({
   aoFechar,
   emAtendimento,
   pilulas,
+  destacar,
 }: {
   req: Requisicao;
   aberta: boolean;
@@ -37,9 +35,11 @@ export function PreviaRequisicao({
   emAtendimento?: boolean;
   /** Pílulas extras do cartão (lançamento no TOTVS). */
   pilulas?: React.ReactNode;
+  /** Busca por item ativa na lista: as linhas que batem ficam marcadas. */
+  destacar?: string;
 }) {
   const navigate = useNavigate();
-  const entregue = ENTREGUE.includes(req.status);
+  const entregue = foiEntregue(req.status);
 
   const linhas = [...(req.itens || [])].sort((a, b) =>
     formatItemName(a.item?.nome).localeCompare(formatItemName(b.item?.nome), "pt-BR")
@@ -112,8 +112,12 @@ export function PreviaRequisicao({
                 const unSep = unidadeEntregue(linha);
                 const qtdSep = Number(linha.quantidade_separada ?? 0);
                 const situacao = avaliarSeparacao(linha.quantidade, unPedida, qtdSep, unSep).situacao;
+                const buscado = !!destacar && contemTexto(formatItemName(linha.item?.nome), destacar);
                 return (
-                  <li key={linha.id} className="flex items-start justify-between gap-3 px-3 py-2.5">
+                  <li
+                    key={linha.id}
+                    className={`flex items-start justify-between gap-3 px-3 py-2.5 ${buscado ? "bg-amber-50" : ""}`}
+                  >
                     <span className="min-w-0 text-sm font-semibold text-slate-800 uppercase [overflow-wrap:anywhere]">
                       {formatItemName(linha.item?.nome) || "Item removido"}
                     </span>

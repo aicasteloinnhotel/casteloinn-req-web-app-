@@ -44,6 +44,10 @@ export const contemTexto = (texto: string | null | undefined, busca: string): bo
 export const precisaLancar = (status?: string | null): boolean =>
   status === "FINALIZADA" || status === "RUPTURA_PARCIAL";
 
+/** A entrega já aconteceu? Só aí a quantidade separada é a entregue. */
+export const foiEntregue = (status?: string | null): boolean =>
+  status === "FINALIZADA" || status === "RUPTURA_PARCIAL" || status === "RUPTURA_TOTAL";
+
 /** Unidade padrão quando nada foi informado nem cadastrado. */
 export const UNIDADE_PADRAO = "UN";
 

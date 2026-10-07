@@ -8,6 +8,8 @@
  */
 
 export type FiltrosRequisicoes = {
+  /** Busca por material: só as requisições que têm esse item. */
+  item: string;
   status: string;
   lancamento: string;
   departamento: string;

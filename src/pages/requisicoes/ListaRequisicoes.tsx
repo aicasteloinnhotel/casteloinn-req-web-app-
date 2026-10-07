@@ -1,9 +1,10 @@
-import React, { useState, useMemo, useEffect } from "react";
+import React, { useState, useMemo, useEffect, useDeferredValue } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { format, startOfDay, endOfDay } from "date-fns";
-import { contemTexto, dataInputParaLocal, precisaLancar } from "@/lib/utils";
+import { contemTexto, dataInputParaLocal, formatItemName, precisaLancar } from "@/lib/utils";
 import { lerFiltros, salvarFiltros } from "@/lib/filtrosRequisicoes";
+import { CampoBusca } from "@/components/CampoBusca";
 import { Button } from "@/components/ui/button";
 import { Plus, RefreshCcw, Filter, ArrowLeft, ClipboardList, ClipboardCheck } from "lucide-react";
 import { hasSupabaseKeys } from "@/lib/supabase";
@@ -61,8 +62,15 @@ export default function ListaRequisicoes() {
     !!salvos.painelAberto || !!(salvos.departamento || salvos.dataInicial || salvos.dataFinal)
   );
 
+  // Busca por material: mostra as requisições que têm esse item, somada aos
+  // outros filtros. Adiada para a digitação não engasgar no celular com
+  // centenas de requisições na lista.
+  const [buscaItem, setBuscaItem] = useState(salvos.item || "");
+  const buscaItemAdiada = useDeferredValue(buscaItem.trim());
+
   useEffect(() => {
     salvarFiltros(user?.id, {
+      item: buscaItem,
       status: quickFilter,
       lancamento: filtroLancamento,
       departamento: advDept,
@@ -70,7 +78,7 @@ export default function ListaRequisicoes() {
       dataFinal: advDateEnd,
       painelAberto: showAdvanced,
     });
-  }, [user?.id, quickFilter, filtroLancamento, advDept, advDateStart, advDateEnd, showAdvanced]);
+  }, [user?.id, buscaItem, quickFilter, filtroLancamento, advDept, advDateStart, advDateEnd, showAdvanced]);
 
   // O atalho do painel já virou filtro guardado: tira da URL, senão um F5
   // depois de trocar o filtro voltaria para o do atalho.
@@ -119,8 +127,28 @@ export default function ListaRequisicoes() {
       result = result.filter(r => new Date(r.created_at).getTime() <= end);
     }
 
+    // Por material, por último: vale junto com todos os filtros acima.
+    if (buscaItemAdiada) {
+      result = result.filter(r =>
+        (r.itens || []).some(l => contemTexto(formatItemName(l.item?.nome), buscaItemAdiada))
+      );
+    }
+
     return result;
-  }, [reqs, quickFilter, filtroLancamento, advDept, advDateStart, advDateEnd]);
+  }, [reqs, quickFilter, filtroLancamento, advDept, advDateStart, advDateEnd, buscaItemAdiada]);
+
+  // Algum filtro além da busca por item? É o que avisa "nos filtros atuais".
+  const outrosFiltrosAtivos =
+    quickFilter !== "TODAS" || filtroLancamento !== "TODOS" ||
+    !!advDept.trim() || !!advDateStart || !!advDateEnd;
+
+  const limparOutrosFiltros = () => {
+    setQuickFilter("TODAS");
+    setFiltroLancamento("TODOS");
+    setAdvDept("");
+    setAdvDateStart("");
+    setAdvDateEnd("");
+  };
 
   const quickFilterOptions = [
     { label: "Todas", value: "TODAS" },
@@ -262,6 +290,35 @@ export default function ListaRequisicoes() {
           barra acima: elas rolavam de lado e os últimos status saíam da tela. */}
       <div className="flex flex-col gap-3">
 
+        {/* Busca por material: "detergente" mostra só as requisições que
+            pediram detergente, respeitando os filtros que estiverem ligados. */}
+        <CampoBusca
+          valor={buscaItem}
+          onMudar={setBuscaItem}
+          placeholder="Buscar por item (ex.: detergente)"
+        />
+
+        {/* Com zero, quem fala é o aviso de lista vazia lá embaixo. */}
+        {buscaItemAdiada && !loading && requisicoes.length > 0 && (
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 -mt-1 text-xs text-slate-600">
+            <span>
+              <strong className="text-slate-800">{requisicoes.length}</strong>{" "}
+              {requisicoes.length === 1 ? "requisição tem" : "requisições têm"}{" "}
+              <strong className="text-slate-800">“{buscaItemAdiada}”</strong>
+              {outrosFiltrosAtivos && " nos filtros atuais"}
+            </span>
+            {outrosFiltrosAtivos && (
+              <button
+                type="button"
+                onClick={limparOutrosFiltros}
+                className="font-bold text-teal-700 hover:text-teal-900 underline underline-offset-2"
+              >
+                buscar em todas
+              </button>
+            )}
+          </div>
+        )}
+
         {/* Filtros avançados, abertos pelo ícone de funil */}
         {showAdvanced && (
           <div className={`bg-white rounded-xl border border-slate-200 shadow-lg shadow-slate-200/50 p-4 grid grid-cols-1 ${user?.perfil !== "SOLICITANTE" ? "sm:grid-cols-3" : "sm:grid-cols-2"} gap-4`}>
@@ -305,20 +362,36 @@ export default function ListaRequisicoes() {
         </div>
       ) : requisicoes.length === 0 ? (
         <div className="text-center py-16 bg-slate-50 rounded-xl border border-slate-200/80 shadow-md shadow-slate-200/50 border-dashed">
-          <p className="text-slate-700 mb-4 font-medium">Nenhuma requisição encontrada com os filtros atuais.</p>
-          <Link to="/requisicoes/nova">
+          <p className="text-slate-700 mb-4 font-medium px-4 [overflow-wrap:anywhere]">
+            {buscaItemAdiada
+              ? `Nenhuma requisição com “${buscaItemAdiada}”${outrosFiltrosAtivos ? " nos filtros atuais" : ""}.`
+              : "Nenhuma requisição encontrada com os filtros atuais."}
+          </p>
+          {/* Buscando um item com filtro ligado, o próximo passo natural é
+              procurar em todas; criar requisição não tem a ver. */}
+          {buscaItemAdiada && outrosFiltrosAtivos ? (
             <Button
               variant="outline"
+              onClick={limparOutrosFiltros}
               className="border-teal-600 text-teal-700 hover:bg-teal-50 font-bold"
             >
-              Criar Nova Requisição
+              Buscar em todas as requisições
             </Button>
-          </Link>
+          ) : (
+            <Link to="/requisicoes/nova">
+              <Button
+                variant="outline"
+                className="border-teal-600 text-teal-700 hover:bg-teal-50 font-bold"
+              >
+                Criar Nova Requisição
+              </Button>
+            </Link>
+          )}
         </div>
       ) : (
         <div className="grid gap-2 sm:gap-3">
           {requisicoes.map((req) => (
-            <RequisicaoCard key={req.id} req={req} />
+            <RequisicaoCard key={req.id} req={req} buscaItem={buscaItemAdiada} />
           ))}
         </div>
       )}
