@@ -61,6 +61,20 @@ export const unidadeEntregue = (
   linha?: Pick<RequisicaoItemComDetalhes, "unidade" | "unidade_separada" | "item"> | null,
 ): string => (linha?.unidade_separada || "").trim().toUpperCase() || unidadeDoItem(linha);
 
+/** Quanto voltou ao almoxarifado depois da entrega (0 sem devolução). */
+export const quantidadeDevolvida = (
+  linha?: Pick<RequisicaoItemComDetalhes, "quantidade_devolvida"> | null,
+): number => Number(linha?.quantidade_devolvida) || 0;
+
+/**
+ * O que SAIU de verdade: entregue menos o que voltou (5 KG − 1,2 KG = 3,8 KG).
+ * É isto que vai para o TOTVS, o comprovante e os relatórios.
+ */
+export const quantidadeQueSaiu = (
+  linha?: Pick<RequisicaoItemComDetalhes, "quantidade_separada" | "quantidade_devolvida"> | null,
+): number =>
+  Math.max(0, Math.round(((Number(linha?.quantidade_separada) || 0) - quantidadeDevolvida(linha)) * 1000) / 1000);
+
 /** Quantidade no formato brasileiro, como o TOTVS espera: 6,2 e não 6.2. */
 export const formatarQtd = (n: number | null | undefined): string =>
   Number(n ?? 0).toLocaleString("pt-BR", { maximumFractionDigits: 3 });

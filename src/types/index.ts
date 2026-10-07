@@ -63,6 +63,29 @@ export interface RequisicaoItem {
   unidade?: string | null;
   /** Unidade em que foi entregue. Vazia = a mesma do pedido. */
   unidade_separada?: string | null;
+  /**
+   * Quanto voltou ao almoxarifado depois da entrega, na unidade entregue
+   * (AJUSTE_06). Saiu de verdade: separada − devolvida. Ausente em banco
+   * sem o ajuste; vale 0.
+   */
+  quantidade_devolvida?: number | null;
+}
+
+/** Devolução ao almoxarifado: mandou a mais e buscou de volta. */
+export interface Devolucao {
+  id: string;
+  requisicao_id: string;
+  requisicao_item_id: string;
+  quantidade: number;
+  unidade: string;
+  motivo: string;
+  usuario_id: string | null;
+  usuario?: { nome: string } | null;
+  created_at: string;
+  /** Registrada errado e desfeita: continua guardada, mas não conta. */
+  desfeita_em?: string | null;
+  desfeita_por?: string | null;
+  desfeita?: { nome: string } | null;
 }
 
 /** Pausa para inventário: com ela ligada, ninguém cria requisição nova. */

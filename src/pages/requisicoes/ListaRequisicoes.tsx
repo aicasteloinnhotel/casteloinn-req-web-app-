@@ -4,7 +4,6 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { format, startOfDay, endOfDay } from "date-fns";
 import { contemTexto, dataInputParaLocal, formatItemName, precisaLancar } from "@/lib/utils";
 import { lerFiltros, salvarFiltros } from "@/lib/filtrosRequisicoes";
-import { CampoBusca } from "@/components/CampoBusca";
 import { Button } from "@/components/ui/button";
 import { Plus, RefreshCcw, Filter, ArrowLeft, ClipboardList, ClipboardCheck } from "lucide-react";
 import { hasSupabaseKeys } from "@/lib/supabase";
@@ -59,7 +58,7 @@ export default function ListaRequisicoes() {
   // Painel aberto se ficou aberto, ou se há filtro nele: filtro escondido
   // aplicado confunde ("cadê as requisições?").
   const [showAdvanced, setShowAdvanced] = useState(
-    !!salvos.painelAberto || !!(salvos.departamento || salvos.dataInicial || salvos.dataFinal)
+    !!salvos.painelAberto || !!(salvos.item || salvos.departamento || salvos.dataInicial || salvos.dataFinal)
   );
 
   // Busca por material: mostra as requisições que têm esse item, somada aos
@@ -267,9 +266,9 @@ export default function ListaRequisicoes() {
             <Button
               variant="outline"
               onClick={() => setShowAdvanced(!showAdvanced)}
-              title="Filtrar por departamento e período"
+              title="Filtrar por item, departamento e período"
               className={`h-11 w-11 p-0 shrink-0 border-slate-200 ${
-                showAdvanced || advDept || advDateStart || advDateEnd
+                showAdvanced || buscaItem || advDept || advDateStart || advDateEnd
                   ? "bg-teal-50 text-teal-700 border-teal-200"
                   : "bg-white text-slate-600 hover:text-slate-900"
               }`}
@@ -290,17 +289,59 @@ export default function ListaRequisicoes() {
           barra acima: elas rolavam de lado e os últimos status saíam da tela. */}
       <div className="flex flex-col gap-3">
 
-        {/* Busca por material: "detergente" mostra só as requisições que
-            pediram detergente, respeitando os filtros que estiverem ligados. */}
-        <CampoBusca
-          valor={buscaItem}
-          onMudar={setBuscaItem}
-          placeholder="Buscar por item (ex.: detergente)"
-        />
+        {/* Filtros avançados, abertos pelo ícone de funil. A busca por item
+            mora aqui, junto dos outros: como barra própria, larga, ela pesava
+            mais na tela do que os filtros que importam mais. */}
+        {showAdvanced && (
+          <div className={`bg-white rounded-xl border border-slate-200 shadow-lg shadow-slate-200/50 p-4 grid grid-cols-1 ${user?.perfil !== "SOLICITANTE" ? "sm:grid-cols-2 lg:grid-cols-4" : "sm:grid-cols-3"} gap-4`}>
+            {/* "detergente" mostra só as requisições que pediram detergente,
+                somado aos outros filtros ligados. */}
+            <div>
+              <label className="text-[10px] font-bold text-slate-700 uppercase tracking-wider mb-1 block">Item</label>
+              <Input
+                type="search"
+                placeholder="Buscar por item..."
+                aria-label="Buscar por item"
+                className="h-9 text-sm"
+                value={buscaItem}
+                onChange={e => setBuscaItem(e.target.value)}
+              />
+            </div>
+            {user?.perfil !== "SOLICITANTE" && (
+              <div>
+                <label className="text-[10px] font-bold text-slate-700 uppercase tracking-wider mb-1 block">Departamento</label>
+                <Input
+                  placeholder="Buscar por departamento..."
+                  className="h-9 text-sm"
+                  value={advDept}
+                  onChange={e => setAdvDept(e.target.value)}
+                />
+              </div>
+            )}
+            <div>
+              <label className="text-[10px] font-bold text-slate-700 uppercase tracking-wider mb-1 block">Data Inicial</label>
+              <Input
+                type="date"
+                className="h-9 text-sm"
+                value={advDateStart}
+                onChange={e => setAdvDateStart(e.target.value)}
+              />
+            </div>
+            <div>
+              <label className="text-[10px] font-bold text-slate-700 uppercase tracking-wider mb-1 block">Data Final</label>
+              <Input
+                type="date"
+                className="h-9 text-sm"
+                value={advDateEnd}
+                onChange={e => setAdvDateEnd(e.target.value)}
+              />
+            </div>
+          </div>
+        )}
 
         {/* Com zero, quem fala é o aviso de lista vazia lá embaixo. */}
         {buscaItemAdiada && !loading && requisicoes.length > 0 && (
-          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 -mt-1 text-xs text-slate-600">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-600">
             <span>
               <strong className="text-slate-800">{requisicoes.length}</strong>{" "}
               {requisicoes.length === 1 ? "requisição tem" : "requisições têm"}{" "}
@@ -316,41 +357,6 @@ export default function ListaRequisicoes() {
                 buscar em todas
               </button>
             )}
-          </div>
-        )}
-
-        {/* Filtros avançados, abertos pelo ícone de funil */}
-        {showAdvanced && (
-          <div className={`bg-white rounded-xl border border-slate-200 shadow-lg shadow-slate-200/50 p-4 grid grid-cols-1 ${user?.perfil !== "SOLICITANTE" ? "sm:grid-cols-3" : "sm:grid-cols-2"} gap-4`}>
-            {user?.perfil !== "SOLICITANTE" && (
-              <div>
-                <label className="text-[10px] font-bold text-slate-700 uppercase tracking-wider mb-1 block">Departamento</label>
-                <Input 
-                  placeholder="Buscar por departamento..." 
-                  className="h-9 text-sm"
-                  value={advDept}
-                  onChange={e => setAdvDept(e.target.value)}
-                />
-              </div>
-            )}
-            <div>
-              <label className="text-[10px] font-bold text-slate-700 uppercase tracking-wider mb-1 block">Data Inicial</label>
-              <Input 
-                type="date" 
-                className="h-9 text-sm"
-                value={advDateStart}
-                onChange={e => setAdvDateStart(e.target.value)}
-              />
-            </div>
-            <div>
-              <label className="text-[10px] font-bold text-slate-700 uppercase tracking-wider mb-1 block">Data Final</label>
-              <Input 
-                type="date" 
-                className="h-9 text-sm"
-                value={advDateEnd}
-                onChange={e => setAdvDateEnd(e.target.value)}
-              />
-            </div>
           </div>
         )}
 

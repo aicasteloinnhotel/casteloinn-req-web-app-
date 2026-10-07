@@ -1,6 +1,6 @@
 import { supabase, hasSupabaseKeys } from "@/lib/supabase";
 import { formatItemName } from "@/lib/utils";
-import { Item, Usuario, Requisicao, RequisicaoItem, Historico, BloqueioRequisicoes } from "@/types";
+import { Item, Usuario, Requisicao, RequisicaoItem, Historico, BloqueioRequisicoes, Devolucao } from "@/types";
 
 // ====================================== //
 // ============ ITENS SERVICE =========== //
@@ -100,6 +100,8 @@ export const getRequisicoes = async (
 ): Promise<Requisicao[]> => {
   if (!hasSupabaseKeys) return [];
 
+  // Linhas com "*": a coluna da devolução (AJUSTE_06) vem quando existe, e a
+  // lista não quebra num banco em que o ajuste ainda não rodou.
   let query = supabase
     .from("requisicoes")
     .select(
@@ -107,11 +109,7 @@ export const getRequisicoes = async (
     *,
     usuario:usuarios!requisicoes_usuario_id_fkey(nome),
     itens:requisicao_itens!requisicao_itens_requisicao_id_fkey(
-      id,
-      quantidade,
-      quantidade_separada,
-      unidade,
-      unidade_separada,
+      *,
       item:itens(*)
     )
   `,
@@ -139,13 +137,7 @@ export const getRequisicao = async (id: string): Promise<Requisicao | null> => {
       *,
       usuario:usuarios!requisicoes_usuario_id_fkey(nome),
       itens:requisicao_itens!requisicao_itens_requisicao_id_fkey(
-        id,
-        requisicao_id,
-        item_id,
-        quantidade,
-        quantidade_separada,
-        unidade,
-        unidade_separada,
+        *,
         item:itens(*)
       )
     `,
@@ -786,4 +778,70 @@ export const desfazerLancamento = async (id: string, usuarioId: string) => {
   if (error) throw error;
 
   await addHistorico(id, "LANCAMENTO_DESFEITO", usuarioId, "Marcação de lançado no TOTVS desfeita.");
+};
+
+// ====================================== //
+// ======= DEVOLUÇÃO AO ALMOXARIFADO ===== //
+// ====================================== //
+
+/** O banco ainda não tem a devolução: o AJUSTE_06 não rodou. */
+const SEM_AJUSTE_06 = "A devolução ainda não existe no banco. Rode o script AJUSTE_06 no Supabase.";
+
+/**
+ * Devoluções da requisição, inclusive as desfeitas (aparecem riscadas).
+ * Banco sem o AJUSTE_06 devolve lista vazia: a tela segue como antes.
+ */
+export const getDevolucoes = async (requisicaoId: string): Promise<Devolucao[]> => {
+  if (!hasSupabaseKeys) return [];
+  const { data, error } = await supabase
+    .from("devolucoes")
+    .select(`
+      *,
+      usuario:usuarios!devolucoes_usuario_id_fkey(nome),
+      desfeita:usuarios!devolucoes_desfeita_por_fkey(nome)
+    `)
+    .eq("requisicao_id", requisicaoId)
+    .order("created_at", { ascending: true });
+  if (error) {
+    console.warn("Devoluções indisponíveis (AJUSTE_06 rodado?):", error.message);
+    return [];
+  }
+  return (data || []) as Devolucao[];
+};
+
+/**
+ * Registra que parte do que foi entregue voltou. As regras (só Almoxarifado,
+ * só antes de lançar, nunca mais do que saiu, motivo obrigatório) ficam no
+ * banco; a mensagem de recusa dele chega pronta para mostrar na tela.
+ */
+export const registrarDevolucao = async (
+  usuarioId: string,
+  requisicaoItemId: string,
+  quantidade: number,
+  motivo: string,
+) => {
+  if (!hasSupabaseKeys) return;
+  const { error } = await supabase.rpc("registrar_devolucao", {
+    p_usuario_id: usuarioId,
+    p_requisicao_item_id: requisicaoItemId,
+    p_quantidade: quantidade,
+    p_motivo: motivo.trim(),
+  });
+  if (error) {
+    if (error.code === "PGRST202") throw new Error(SEM_AJUSTE_06);
+    throw new Error(error.message);
+  }
+};
+
+/** Desfaz uma devolução registrada errado. Ela continua guardada, marcada. */
+export const desfazerDevolucao = async (usuarioId: string, devolucaoId: string) => {
+  if (!hasSupabaseKeys) return;
+  const { error } = await supabase.rpc("desfazer_devolucao", {
+    p_usuario_id: usuarioId,
+    p_devolucao_id: devolucaoId,
+  });
+  if (error) {
+    if (error.code === "PGRST202") throw new Error(SEM_AJUSTE_06);
+    throw new Error(error.message);
+  }
 };

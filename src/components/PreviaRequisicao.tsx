@@ -13,7 +13,7 @@ import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/StatusBadge";
 import { Requisicao } from "@/types";
 import { contemTexto, foiEntregue, formatItemName, unidadeDoItem } from "@/lib/utils";
-import { avaliarSeparacao, formatarQtd, unidadeEntregue } from "@/lib/unidades";
+import { avaliarSeparacao, formatarQtd, quantidadeDevolvida, quantidadeQueSaiu, unidadeEntregue } from "@/lib/unidades";
 
 /**
  * Prévia rápida da requisição, aberta pelo olho no cartão da lista: quem, de
@@ -140,6 +140,11 @@ export function PreviaRequisicao({
                           }`}
                         >
                           {qtdSep <= 0 ? "não entregue" : `entregue ${formatarQtd(qtdSep)} ${unSep}`}
+                        </span>
+                      )}
+                      {entregue && quantidadeDevolvida(linha) > 0 && (
+                        <span className="block text-xs font-bold tabular-nums mt-0.5 text-violet-700">
+                          voltou {formatarQtd(quantidadeDevolvida(linha))} · saiu {formatarQtd(quantidadeQueSaiu(linha))} {unSep}
                         </span>
                       )}
                     </span>

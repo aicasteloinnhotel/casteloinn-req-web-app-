@@ -8,7 +8,7 @@ import { Requisicao } from "@/types";
 import { isLockAtivo } from "@/services/api";
 import { StatusBadge } from "@/components/StatusBadge";
 import { contemTexto, foiEntregue, formatItemName, precisaLancar, unidadeDoItem } from "@/lib/utils";
-import { formatarQtd, unidadeEntregue } from "@/lib/unidades";
+import { formatarQtd, quantidadeDevolvida, quantidadeQueSaiu, unidadeEntregue } from "@/lib/unidades";
 import { useNavigate } from "react-router-dom";
 
 export const RequisicaoCard = React.memo(({ req, buscaItem }: { req: Requisicao; buscaItem?: string }) => {
@@ -47,8 +47,12 @@ export const RequisicaoCard = React.memo(({ req, buscaItem }: { req: Requisicao;
   const entregue = foiEntregue(req.status);
   const qtdDaLinha = (l: NonNullable<Requisicao["itens"]>[number]) => {
     if (!entregue) return `${formatarQtd(l.quantidade)} ${unidadeDoItem(l)}`;
-    const sep = Number(l.quantidade_separada ?? 0);
-    return sep > 0 ? `entregue ${formatarQtd(sep)} ${unidadeEntregue(l)}` : "não entregue";
+    if (Number(l.quantidade_separada ?? 0) <= 0) return "não entregue";
+    // Com devolução, o que conta é o que ficou no setor.
+    const voltou = quantidadeDevolvida(l);
+    return voltou > 0
+      ? `saiu ${formatarQtd(quantidadeQueSaiu(l))} ${unidadeEntregue(l)} (voltou ${formatarQtd(voltou)})`
+      : `entregue ${formatarQtd(quantidadeQueSaiu(l))} ${unidadeEntregue(l)}`;
   };
 
   // Prévia sem sair da lista. O clique no olho não pode chegar ao cartão,

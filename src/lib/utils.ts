@@ -80,13 +80,16 @@ export const descreverQuantidades = (
     .join(" + ");
 };
 
-/** Quantidade entregue quando já foi separada; senão, a pedida. Nulo conta como não separado. */
+/**
+ * Quantidade que saiu quando já foi separada (descontada a devolução ao
+ * almoxarifado); senão, a pedida. Nulo conta como não separado.
+ */
 export const quantidadeEfetiva = (
-  linha: { quantidade: number; quantidade_separada?: number | null },
+  linha: { quantidade: number; quantidade_separada?: number | null; quantidade_devolvida?: number | null },
   entregue: boolean,
 ): number =>
   entregue && linha.quantidade_separada != null
-    ? Number(linha.quantidade_separada)
+    ? Math.max(0, Math.round((Number(linha.quantidade_separada) - (Number(linha.quantidade_devolvida) || 0)) * 1000) / 1000)
     : Number(linha.quantidade) || 0;
 
 /**

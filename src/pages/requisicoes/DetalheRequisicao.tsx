@@ -1,8 +1,14 @@
 import React, { useEffect, useState } from "react";
 import { useParams, useNavigate, useLocation } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
-import { formatItemName, precisaLancar, unidadeDoItem } from "@/lib/utils";
-import { avaliarSeparacao, formatarQtd, unidadeEntregue } from "@/lib/unidades";
+import { foiEntregue, formatItemName, precisaLancar, unidadeDoItem } from "@/lib/utils";
+import {
+  avaliarSeparacao,
+  formatarQtd,
+  quantidadeDevolvida,
+  quantidadeQueSaiu,
+  unidadeEntregue,
+} from "@/lib/unidades";
 import { TERMO_TITULO, TERMO_RESUMO_PDF } from "@/lib/termoEntrega";
 import {
   getRequisicao,
@@ -15,10 +21,13 @@ import {
   getUsuarioNome,
   lockRequisicao,
   marcarRequisicaoLancada,
-  desfazerLancamento
+  desfazerLancamento,
+  getDevolucoes,
+  registrarDevolucao,
+  desfazerDevolucao
 } from "@/services/api";
 import { playSound } from "@/lib/sounds";
-import { Requisicao, Historico } from "@/types";
+import { Requisicao, Historico, Devolucao } from "@/types";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 
@@ -38,7 +47,8 @@ import {
   ClipboardList,
   ShieldCheck,
   Undo2,
-  Lock
+  Lock,
+  PackageMinus
 } from "lucide-react";
 import { toast } from "@/lib/toast";
 import { supabase } from "@/lib/supabase";
@@ -78,7 +88,24 @@ const ROTULOS_HISTORICO: Record<string, string> = {
   EXPORTADO: "PDF EXPORTADO",
   LANCADA_NO_TOTVS: "LANÇADA NO TOTVS",
   LANCAMENTO_DESFEITO: "LANÇAMENTO DESFEITO",
+  DEVOLUCAO: "DEVOLUÇÃO AO ALMOXARIFADO",
+  DEVOLUCAO_DESFEITA: "DEVOLUÇÃO DESFEITA",
 };
+
+/** "1,2" ou "1.2" → 1.2. No celular a vírgula é o que se digita. */
+const lerQuantidade = (texto: string): number => {
+  const t = texto.trim();
+  if (!t) return NaN;
+  return Number(t.includes(",") ? t.replace(/\./g, "").replace(",", ".") : t);
+};
+
+/** Motivos que mais se repetem: um toque preenche, e dá para editar depois. */
+// Sem travessão: o motivo vai para o PDF, e a fonte padrão dele não tem o "—".
+const MOTIVOS_DEVOLUCAO = [
+  "Excesso, recolhido no setor",
+  "Entregue errado",
+  "Avaria ou não serviu",
+];
 
 const rotuloDoHistorico = (acao: string): string => {
   if (acao.startsWith("STATUS_ALTERADO_")) {
@@ -122,6 +149,7 @@ export default function DetalheRequisicao() {
   const navigate = useNavigate();
   const [req, setReq] = useState<Requisicao | null>(null);
   const [historico, setHistorico] = useState<Historico[]>([]);
+  const [devolucoes, setDevolucoes] = useState<Devolucao[]>([]);
   const [loading, setLoading] = useState(true);
   const [updating, setUpdating] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
@@ -136,6 +164,7 @@ export default function DetalheRequisicao() {
     setLoading(true);
     setReq(null);
     setHistorico([]);
+    setDevolucoes([]);
     setRel(null);
 
     carregarDetalhes(id);
@@ -189,8 +218,9 @@ export default function DetalheRequisicao() {
       setSignatureConferenteBase64(
         data?.assinatura_almoxarifado || location.state?.assinaturaAlmoxarifado || null,
       );
-      const hist = await getHistorico(reqId);
+      const [hist, devs] = await Promise.all([getHistorico(reqId), getDevolucoes(reqId)]);
       setHistorico(hist);
+      setDevolucoes(devs);
 
       // Vínculos: uma requisição pode ser complementar de outra E ter gerado a
       // sua própria complementar (ruptura em cima de ruptura). Antes só um dos
@@ -342,12 +372,14 @@ export default function DetalheRequisicao() {
     const doc = new jsPDF({ compress: true });
 
     // Pedido e entregue cada um com a sua unidade: "5 UN" pedido, "6,2 KG" entregue.
+    // Com devolução, "Entregue" é o que ficou (bate com o TOTVS), marcado com
+    // "*"; a nota abaixo da tabela diz quanto saiu e quanto voltou.
     const head = [["Item", "Solicitado", "Entregue", "Conferência"]];
     const body = req.itens?.map((i) => [
       formatItemName(i.item?.nome),
       `${formatarQtd(i.quantidade)} ${unidadeDoItem(i)}`,
       i.quantidade_separada !== undefined && i.quantidade_separada !== null
-        ? `${formatarQtd(i.quantidade_separada)} ${unidadeEntregue(i)}`
+        ? `${formatarQtd(quantidadeQueSaiu(i))} ${unidadeEntregue(i)}${quantidadeDevolvida(i) > 0 ? " *" : ""}`
         : "",
       (req.status === 'FINALIZADA' || req.status === 'RUPTURA_PARCIAL' || req.status === 'RUPTURA_TOTAL' || signatureRecebedorBase64 || signatureConferenteBase64) ? "[X]" : ""
     ]) || [];
@@ -425,6 +457,32 @@ export default function DetalheRequisicao() {
     });
 
     let finalY = (doc as any).lastAutoTable.finalY + 8;
+
+    // Devoluções ao almoxarifado: o papel assinado dizia "5 KG"; aqui fica
+    // registrado que 1,2 KG voltou, quando, com quem e por quê.
+    const devolucoesAtivas = devolucoes.filter((d) => !d.desfeita_em);
+    if (devolucoesAtivas.length > 0) {
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(8.5);
+      doc.text("* Devoluções ao almoxarifado depois da entrega:", 14, finalY);
+      finalY += 4.5;
+      doc.setFont("helvetica", "normal");
+      for (const d of devolucoesAtivas) {
+        const linha = req.itens?.find((l) => l.id === d.requisicao_item_id);
+        const texto =
+          `${formatItemName(linha?.item?.nome)}: entregue ${formatarQtd(linha?.quantidade_separada)} ${d.unidade}, ` +
+          `voltou ${formatarQtd(d.quantidade)} ${d.unidade} em ${format(new Date(d.created_at), "dd/MM/yyyy 'às' HH:mm")}` +
+          ` (${d.usuario?.nome || "---"}). Motivo: ${d.motivo}`;
+        const partes = doc.splitTextToSize(texto, 180);
+        if (finalY + partes.length * 4 > 270) {
+          doc.addPage();
+          finalY = 45;
+        }
+        doc.text(partes, 14, finalY);
+        finalY += partes.length * 4 + 1;
+      }
+      finalY += 4;
+    }
 
     // Quem lançou no TOTVS e quem imprimiu: o papel diz de quem cobrar.
     const nomeDeQuemLancou =
@@ -614,6 +672,56 @@ export default function DetalheRequisicao() {
     }
   };
 
+  // Devolução ao almoxarifado: mandou a mais e buscou de volta no setor.
+  const [showDevolucao, setShowDevolucao] = React.useState(false);
+  const [devLinhaId, setDevLinhaId] = React.useState("");
+  const [devQtd, setDevQtd] = React.useState("");
+  const [devMotivo, setDevMotivo] = React.useState("");
+  const [desfazendo, setDesfazendo] = React.useState<Devolucao | null>(null);
+
+  const abrirDevolucao = () => {
+    // Um item só para devolver: já vem escolhido.
+    const candidatas = (req?.itens || []).filter((l) => quantidadeQueSaiu(l) > 0);
+    setDevLinhaId(candidatas.length === 1 ? candidatas[0].id : "");
+    setDevQtd("");
+    setDevMotivo("");
+    setShowDevolucao(true);
+  };
+
+  const handleRegistrarDevolucao = async () => {
+    if (!req || !user) return;
+    const qtd = lerQuantidade(devQtd);
+    setUpdating(true);
+    try {
+      await registrarDevolucao(user.id, devLinhaId, qtd, devMotivo);
+      const linha = req.itens?.find((l) => l.id === devLinhaId);
+      toast.success(
+        `Devolução registrada: ${formatarQtd(qtd)} ${linha ? unidadeEntregue(linha) : ""} de ${formatItemName(linha?.item?.nome)}.`,
+      );
+      setShowDevolucao(false);
+      await carregarDetalhes(req.id);
+    } catch (e: any) {
+      toast.error(e?.message || "Não foi possível registrar a devolução.");
+    } finally {
+      setUpdating(false);
+    }
+  };
+
+  const handleDesfazerDevolucao = async () => {
+    if (!req || !user || !desfazendo) return;
+    setUpdating(true);
+    try {
+      await desfazerDevolucao(user.id, desfazendo.id);
+      toast.info("Devolução desfeita.");
+      setDesfazendo(null);
+      await carregarDetalhes(req.id);
+    } catch (e: any) {
+      toast.error(e?.message || "Não foi possível desfazer a devolução.");
+    } finally {
+      setUpdating(false);
+    }
+  };
+
   const handleDesfazerLancamento = async () => {
     if (!req || !user) return;
     setUpdating(true);
@@ -701,21 +809,39 @@ export default function DetalheRequisicao() {
   // (nada saiu) não entram. Já lançada continua acessível, para desfazer.
   const podeLancar = ehAlmoxarifado && (precisaLancar(req.status) || !!req.lancado);
 
-  /** Linhas do jeito que o TOTVS precisa: material, quantidade ENTREGUE e a
-   *  unidade em que saiu (pedido 5 UN, entregue 6,2 KG → lança 6,2 KG). */
+  /** Linhas do jeito que o TOTVS precisa: material, quantidade que SAIU e a
+   *  unidade em que saiu (pedido 5 UN, entregue 6,2 KG → lança 6,2 KG).
+   *  Devolução ao almoxarifado já vem descontada (entregue 5, voltou 1,2 → 3,8). */
   const todasAsLinhas = (req.itens || []).map((linha) => {
     const separada = linha.quantidade_separada !== undefined && linha.quantidade_separada !== null;
     return {
       id: linha.id,
       nome: formatItemName(linha.item?.nome),
-      quantidade: separada ? Number(linha.quantidade_separada) : linha.quantidade,
+      quantidade: separada ? quantidadeQueSaiu(linha) : linha.quantidade,
       unidade: separada ? unidadeEntregue(linha) : unidadeDoItem(linha),
+      entregou: separada && Number(linha.quantidade_separada) > 0,
+      voltou: quantidadeDevolvida(linha),
     };
   });
   // Item que não saiu (entregue 0) não se lança: ele foi para a complementar.
   // Antes aparecia "PAPEL TOALHA — 0" na lista e no "Copiar lista".
   const linhasParaLancamento = todasAsLinhas.filter((l) => Number(l.quantidade) > 0);
-  const linhasNaoEntregues = todasAsLinhas.length - linhasParaLancamento.length;
+  const foraDoLancamento = todasAsLinhas.filter((l) => Number(l.quantidade) <= 0);
+  // Entregue e devolvido por inteiro: também fica de fora, mas não é falta.
+  const linhasDevolvidasInteiras = foraDoLancamento.filter((l) => l.entregou).length;
+  const linhasNaoEntregues = foraDoLancamento.length - linhasDevolvidasInteiras;
+  const linhasComDevolucao = todasAsLinhas.filter((l) => l.voltou > 0).length;
+
+  // Devolução: só o almoxarifado, só entregue e ainda não lançada, e só se
+  // ainda há o que devolver. A regra de verdade está no banco (AJUSTE_06).
+  const linhasDevolviveis = (req.itens || []).filter((l) => quantidadeQueSaiu(l) > 0);
+  const podeDevolver = ehAlmoxarifado && foiEntregue(req.status) && !req.lancado && linhasDevolviveis.length > 0;
+  const podeDesfazerDevolucao = ehAlmoxarifado && !req.lancado;
+  const linhaDevolucao = req.itens?.find((l) => l.id === devLinhaId);
+  const maxDevolucao = linhaDevolucao ? quantidadeQueSaiu(linhaDevolucao) : 0;
+  const qtdDevolucao = lerQuantidade(devQtd);
+  const devolucaoValida =
+    !!linhaDevolucao && qtdDevolucao > 0 && qtdDevolucao <= maxDevolucao && devMotivo.trim().length >= 3;
 
   return (
     <div className="space-y-6 max-w-3xl mx-auto pb-10 print:p-0 print:max-w-none">
@@ -926,17 +1052,23 @@ export default function DetalheRequisicao() {
 
 
             <div className="space-y-3">
-              {req.itens?.map((prod) => (
+              {req.itens?.map((prod) => {
+                const devsDaLinha = devolucoes.filter((d) => d.requisicao_item_id === prod.id);
+                const voltou = quantidadeDevolvida(prod);
+                return (
                 <div
                   key={prod.id}
-                  className="flex flex-col sm:flex-row sm:justify-between items-start sm:items-center p-4 bg-white border border-slate-200/80 shadow-md shadow-slate-200/50 rounded-xl shadow-lg shadow-slate-200/50 gap-3"
+                  className="p-4 bg-white border border-slate-200/80 rounded-xl shadow-lg shadow-slate-200/50"
                 >
+                <div className="flex flex-col sm:flex-row sm:justify-between items-start sm:items-center gap-3">
                   <div className="flex-1 pr-4 min-w-0">
                     <p className="font-bold text-slate-800 text-sm sm:text-base break-words">
                       {formatItemName(prod.item?.nome)}
                     </p>
                   </div>
-                  <div className="flex items-center gap-4 sm:gap-6 self-end sm:self-auto">
+                  {/* flex-wrap: com Solicitado, Entregue, Ruptura e Voltou são
+                      quatro caixas, e no celular de 360px não cabem numa linha. */}
+                  <div className="flex flex-wrap items-center justify-end gap-x-4 gap-y-2 sm:gap-x-6 self-end sm:self-auto">
                       <div className="text-center">
                         <p className="text-[10px] font-bold text-slate-700 uppercase mb-1">Solicitado</p>
                         <p className="text-lg font-black text-slate-700 whitespace-nowrap">{formatarQtd(prod.quantidade)} <span className="text-sm font-bold text-slate-700">{unidadeDoItem(prod)}</span></p>
@@ -975,19 +1107,87 @@ export default function DetalheRequisicao() {
                                 <p className="text-xs font-bold text-sky-800 leading-tight">trocada<br />na entrega</p>
                               </div>
                             )}
+
+                            {/* Devolução: o entregue (assinado) fica; aqui o que
+                                voltou e, embaixo, o que saiu de verdade. */}
+                            {voltou > 0 && (
+                              <div className="text-center bg-violet-50 px-3 py-1 rounded-lg border border-violet-200">
+                                <p className="text-[10px] font-bold text-violet-700 uppercase mb-1">Voltou</p>
+                                <p className="text-lg font-black text-violet-800 whitespace-nowrap">-{formatarQtd(voltou)} <span className="text-sm font-bold text-violet-600">{unEntregue}</span></p>
+                                <p className="text-[10px] font-bold text-violet-700 whitespace-nowrap">saiu {formatarQtd(quantidadeQueSaiu(prod))} {unEntregue}</p>
+                              </div>
+                            )}
                           </>
                         );
                       })()}
                     </div>
                 </div>
-              ))}
+
+                {/* Cada devolução da linha: quanto, quando, quem e por quê.
+                    Desfeita continua aqui, riscada, para ninguém achar que sumiu. */}
+                {devsDaLinha.length > 0 && (
+                  <ul className="mt-3 pt-3 border-t border-slate-100 space-y-2">
+                    {devsDaLinha.map((d) => (
+                      <li key={d.id} className="flex items-start justify-between gap-3 text-xs">
+                        <div className={`min-w-0 ${d.desfeita_em ? "text-slate-400" : "text-slate-700"}`}>
+                          <p className={`font-bold ${d.desfeita_em ? "line-through" : "text-violet-800"}`}>
+                            <Undo2 className="inline h-3.5 w-3.5 mr-1 -mt-0.5" />
+                            Voltou {formatarQtd(d.quantidade)} {d.unidade}
+                            <span className="font-medium">
+                              {" "}— {format(new Date(d.created_at), "dd/MM 'às' HH:mm")}, {d.usuario?.nome || "---"}
+                            </span>
+                          </p>
+                          <p className={`[overflow-wrap:anywhere] ${d.desfeita_em ? "line-through" : ""}`}>Motivo: {d.motivo}</p>
+                          {d.desfeita_em && (
+                            <p className="font-semibold text-slate-500">
+                              Desfeita em {format(new Date(d.desfeita_em), "dd/MM 'às' HH:mm")}
+                              {d.desfeita?.nome ? ` por ${d.desfeita.nome}` : ""}
+                            </p>
+                          )}
+                        </div>
+                        {!d.desfeita_em && podeDesfazerDevolucao && (
+                          <button
+                            type="button"
+                            onClick={() => setDesfazendo(d)}
+                            className="shrink-0 h-8 px-2.5 rounded-md border border-slate-200 bg-white font-bold text-slate-600 hover:bg-slate-50 hover:text-slate-900"
+                          >
+                            Desfazer
+                          </button>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                </div>
+                );
+              })}
 
               {req.itens?.length === 0 && (
                 <div className="p-4 text-center text-slate-700">Nenhum item na requisição.</div>
               )}
 
-              
+
             </div>
+
+            {podeDevolver && (
+              <div className="rounded-xl border border-violet-200 bg-violet-50/60 p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 print:hidden">
+                <div className="min-w-0">
+                  <p className="text-sm font-bold text-violet-900">Mandou a mais e buscou de volta?</p>
+                  <p className="text-xs text-violet-800 mt-0.5">
+                    Registre a devolução antes de lançar no TOTVS. O entregue continua registrado;
+                    o lançamento e o comprovante passam a usar o que ficou no setor.
+                  </p>
+                </div>
+                <Button
+                  onClick={abrirDevolucao}
+                  variant="outline"
+                  disabled={updating}
+                  className="h-11 shrink-0 border-violet-300 bg-white text-violet-800 hover:bg-violet-100 hover:text-violet-900 font-bold"
+                >
+                  <PackageMinus className="h-4 w-4 mr-2" /> Registrar devolução
+                </Button>
+              </div>
+            )}
           </div>
 
           {req.observacao && (
@@ -1135,6 +1335,159 @@ export default function DetalheRequisicao() {
         </div>
       </div>
 
+      {/* Registrar devolução ao almoxarifado */}
+      <Dialog open={showDevolucao} onOpenChange={setShowDevolucao}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader className="pr-8">
+            <DialogTitle className="flex items-center gap-2 text-violet-900 font-bold">
+              <PackageMinus className="h-5 w-5 shrink-0" /> Registrar devolução
+            </DialogTitle>
+            <DialogDescription>
+              REQ #{req.codigo_requisicao} — o que voltou do setor para o almoxarifado.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            <div>
+              <label htmlFor="dev-item" className="text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1 block">
+                Item
+              </label>
+              <select
+                id="dev-item"
+                value={devLinhaId}
+                onChange={(e) => setDevLinhaId(e.target.value)}
+                className="w-full h-11 rounded-lg border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-violet-500"
+              >
+                <option value="" disabled>Escolha o item...</option>
+                {linhasDevolviveis.map((l) => (
+                  <option key={l.id} value={l.id}>
+                    {formatItemName(l.item?.nome)} — saiu {formatarQtd(quantidadeQueSaiu(l))} {unidadeEntregue(l)}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label htmlFor="dev-qtd" className="text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1 block">
+                Quanto voltou
+              </label>
+              <div className="flex items-center gap-2 flex-wrap">
+                {/* Texto com teclado numérico: aceita "1,2", que é o que se
+                    digita no celular (o campo numérico do navegador recusa). */}
+                <input
+                  id="dev-qtd"
+                  type="text"
+                  inputMode="decimal"
+                  autoComplete="off"
+                  value={devQtd}
+                  onChange={(e) => setDevQtd(e.target.value.replace(/[^\d.,]/g, ""))}
+                  placeholder="0"
+                  disabled={!linhaDevolucao}
+                  className="h-11 w-28 rounded-lg border border-slate-300 bg-white px-3 text-lg font-black text-center text-slate-800 focus:outline-none focus:ring-2 focus:ring-violet-500 disabled:bg-slate-50"
+                />
+                <span className="text-base font-bold text-slate-700">
+                  {linhaDevolucao ? unidadeEntregue(linhaDevolucao) : ""}
+                </span>
+                {linhaDevolucao && (
+                  <span className="text-xs text-slate-500">máximo {formatarQtd(maxDevolucao)}</span>
+                )}
+              </div>
+              {linhaDevolucao && qtdDevolucao > maxDevolucao && (
+                <p className="text-xs font-semibold text-red-700 mt-1">
+                  Voltou mais do que saiu: o máximo é {formatarQtd(maxDevolucao)} {unidadeEntregue(linhaDevolucao)}.
+                </p>
+              )}
+            </div>
+
+            <div>
+              <label htmlFor="dev-motivo" className="text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1 block">
+                Motivo
+              </label>
+              <div className="flex flex-wrap gap-1.5 mb-2">
+                {MOTIVOS_DEVOLUCAO.map((m) => (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => setDevMotivo(m)}
+                    className={`text-xs font-semibold px-2.5 py-1.5 rounded-full border transition-colors ${
+                      devMotivo === m
+                        ? "border-violet-400 bg-violet-100 text-violet-900"
+                        : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                    }`}
+                  >
+                    {m}
+                  </button>
+                ))}
+              </div>
+              <textarea
+                id="dev-motivo"
+                rows={2}
+                value={devMotivo}
+                onChange={(e) => setDevMotivo(e.target.value)}
+                placeholder="Ex.: carne a mais, recolhida na cozinha"
+                className="w-full rounded-lg border border-slate-300 bg-white p-2.5 text-sm text-slate-800 resize-none focus:outline-none focus:ring-2 focus:ring-violet-500"
+              />
+            </div>
+
+            {linhaDevolucao && qtdDevolucao > 0 && qtdDevolucao <= maxDevolucao && (
+              <p className="text-xs text-violet-900 bg-violet-50 border border-violet-200 rounded-lg p-2.5">
+                Entregue {formatarQtd(linhaDevolucao.quantidade_separada)} {unidadeEntregue(linhaDevolucao)}
+                {quantidadeDevolvida(linhaDevolucao) > 0 && <>, já voltou {formatarQtd(quantidadeDevolvida(linhaDevolucao))}</>}
+                , volta agora {formatarQtd(qtdDevolucao)} → saída de{" "}
+                <strong>
+                  {formatarQtd(Math.round((maxDevolucao - qtdDevolucao) * 1000) / 1000)} {unidadeEntregue(linhaDevolucao)}
+                </strong>
+                . É o que vai para o TOTVS.
+              </p>
+            )}
+          </div>
+
+          <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-2 pt-2">
+            <Button variant="outline" onClick={() => setShowDevolucao(false)} className="font-bold h-11">
+              Cancelar
+            </Button>
+            <Button
+              onClick={handleRegistrarDevolucao}
+              disabled={!devolucaoValida || updating}
+              className="font-bold h-11 bg-violet-700 hover:bg-violet-800 text-white"
+            >
+              {updating ? "Registrando..." : "Registrar devolução"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Desfazer devolução registrada errado */}
+      <Dialog open={!!desfazendo} onOpenChange={(abrir) => { if (!abrir) setDesfazendo(null); }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader className="pr-8">
+            <DialogTitle>Desfazer esta devolução?</DialogTitle>
+            <DialogDescription>
+              {desfazendo && (
+                <>
+                  {formatarQtd(desfazendo.quantidade)} {desfazendo.unidade} de{" "}
+                  {formatItemName(req.itens?.find((l) => l.id === desfazendo.requisicao_item_id)?.item?.nome)}, registrada em{" "}
+                  {format(new Date(desfazendo.created_at), "dd/MM 'às' HH:mm")} por {desfazendo.usuario?.nome || "---"}.
+                  Ela continua no histórico, marcada como desfeita, e a quantidade volta a contar como entregue.
+                </>
+              )}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-2 pt-2">
+            <Button variant="outline" onClick={() => setDesfazendo(null)} className="font-bold h-11">
+              Voltar
+            </Button>
+            <Button
+              onClick={handleDesfazerDevolucao}
+              disabled={updating}
+              className="font-bold h-11 bg-slate-800 hover:bg-slate-900 text-white"
+            >
+              {updating ? "Desfazendo..." : "Desfazer devolução"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
       {/* Confirmação de cancelamento */}
       <Dialog open={confirmarCancelamento} onOpenChange={setConfirmarCancelamento}>
         <DialogContent className="sm:max-w-md">
@@ -1231,7 +1584,8 @@ export default function DetalheRequisicao() {
 
             <p className="text-xs text-slate-500">
               Solicitante: <span className="font-semibold text-slate-700">{req.usuario?.nome || "---"}</span>
-              {" · "}Quantidades mostradas são as <strong>entregues</strong>.
+              {" · "}Quantidades mostradas são as <strong>entregues</strong>
+              {linhasComDevolucao > 0 ? <>, já <strong>descontadas as devoluções</strong>.</> : "."}
               {linhasNaoEntregues > 0 && (
                 <>
                   {" "}
@@ -1239,6 +1593,14 @@ export default function DetalheRequisicao() {
                     ? "1 item não foi entregue e ficou de fora"
                     : `${linhasNaoEntregues} itens não foram entregues e ficaram de fora`}
                   {rel?.complementar ? ` (vai na REQ #${rel.complementar.codigo}).` : "."}
+                </>
+              )}
+              {linhasDevolvidasInteiras > 0 && (
+                <>
+                  {" "}
+                  {linhasDevolvidasInteiras === 1
+                    ? "1 item voltou inteiro ao almoxarifado e ficou de fora."
+                    : `${linhasDevolvidasInteiras} itens voltaram inteiros ao almoxarifado e ficaram de fora.`}
                 </>
               )}
             </p>

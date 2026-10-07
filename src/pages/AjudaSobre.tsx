@@ -27,6 +27,7 @@ import {
   Users,
   Eye,
   PauseCircle,
+  PackageMinus,
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useInstallApp } from "@/hooks/useInstallApp";
@@ -425,6 +426,24 @@ export default function AjudaSobre() {
                     O filtro <strong>A lançar</strong>, na lista de Requisições, mostra o que ainda
                     falta. Marcou por engano? Abra de novo e toque em{" "}
                     <strong>Desfazer lançamento</strong>.
+                  </p>
+                </Topico>
+
+                <Topico icone={<PackageMinus />} titulo="Devolução (mandou a mais)">
+                  <p>
+                    Entregou a mais e buscou de volta no setor? Abra a requisição entregue e toque em{" "}
+                    <strong>Registrar devolução</strong>: escolha o item, quanto voltou e o motivo.
+                  </p>
+                  <p>
+                    O entregue (o que foi assinado) continua registrado, e o que voltou aparece
+                    embaixo do item. O lançamento no TOTVS, o comprovante e os relatórios passam a
+                    usar o que ficou no setor (entregue 5 KG, voltou 1,2 KG → saída de 3,8 KG).
+                  </p>
+                  <p>
+                    Só antes de lançar no TOTVS. Já lançou? Toque em{" "}
+                    <strong>Desfazer lançamento</strong>, registre a devolução e lance de novo.
+                    Registrou errado? Toque em <strong>Desfazer</strong> ao lado da devolução. Mandou
+                    a menos? Faça outra requisição com o que faltou.
                   </p>
                 </Topico>
 
