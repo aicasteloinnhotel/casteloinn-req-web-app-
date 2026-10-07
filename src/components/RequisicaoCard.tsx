@@ -1,7 +1,8 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Card, CardContent } from "@/components/ui/card";
 import { format } from "date-fns";
-import { ChevronRight, Lock, ClipboardCheck, ClipboardList } from "lucide-react";
+import { ChevronRight, Lock, ClipboardCheck, ClipboardList, Eye } from "lucide-react";
+import { PreviaRequisicao } from "@/components/PreviaRequisicao";
 import { useAuth } from "@/contexts/AuthContext";
 import { Requisicao } from "@/types";
 import { isLockAtivo } from "@/services/api";
@@ -33,8 +34,19 @@ export const RequisicaoCard = React.memo(({ req }: { req: Requisicao }) => {
     </span>
   );
 
+  // Prévia sem sair da lista. O clique no olho não pode chegar ao cartão,
+  // que abriria a requisição.
+  const [previa, setPrevia] = useState(false);
+  const abrirPrevia = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setPrevia(true);
+  };
+
+  // A janela fica FORA do <Card>: o React leva os cliques de dentro dela até
+  // os componentes pais, e o onClick do cartão abriria a requisição.
   return (
-    <Card 
+    <>
+    <Card
       className={`border-none shadow-lg shadow-slate-200/50 bg-white cursor-pointer hover:shadow-md transition-all hover:ring-2 hover:ring-teal-500/50 ${
         req.status === 'PENDENTE' ? 'border-l-4 border-l-yellow-400' : 
         req.status === 'AGUARDANDO' ? 'border-l-4 border-l-amber-500' : 
@@ -71,17 +83,28 @@ export const RequisicaoCard = React.memo(({ req }: { req: Requisicao }) => {
         <p className="text-xs text-slate-600 break-words leading-snug">
           {req.usuario?.nome || "---"}
         </p>
-        <p className="text-xs text-slate-500 mt-1">
-          {req.itens?.length || 0} {req.itens?.length === 1 ? "item" : "itens"}
-          {" • "}
-          {format(new Date(req.created_at), "dd/MM HH:mm")}
-        </p>
-
-        {isLockedByOther && (
-          <span className="mt-2 text-[10px] font-semibold text-rose-700 bg-rose-100 px-2 py-0.5 rounded-full inline-flex items-center gap-1">
-            <Lock className="w-3 h-3" /> Em Atendimento
-          </span>
-        )}
+        <div className="flex items-end justify-between gap-2 mt-1">
+          <div className="min-w-0">
+            <p className="text-xs text-slate-500">
+              {req.itens?.length || 0} {req.itens?.length === 1 ? "item" : "itens"}
+              {" • "}
+              {format(new Date(req.created_at), "dd/MM HH:mm")}
+            </p>
+            {isLockedByOther && (
+              <span className="mt-2 text-[10px] font-semibold text-rose-700 bg-rose-100 px-2 py-0.5 rounded-full inline-flex items-center gap-1">
+                <Lock className="w-3 h-3" /> Em Atendimento
+              </span>
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={abrirPrevia}
+            aria-label={`Prévia da requisição #${req.codigo_requisicao}`}
+            className="shrink-0 h-9 px-3 rounded-lg border border-slate-200 bg-white text-xs font-bold text-slate-600 inline-flex items-center gap-1.5 hover:bg-teal-50 hover:text-teal-700 hover:border-teal-200 active:bg-teal-100 transition-colors"
+          >
+            <Eye className="w-4 h-4" /> Prévia
+          </button>
+        </div>
       </CardContent>
 
       {/* COMPUTADOR: colunas, que é onde elas cabem de verdade. */}
@@ -130,10 +153,31 @@ export const RequisicaoCard = React.memo(({ req }: { req: Requisicao }) => {
           </div>
         </div>
 
-        <div className="shrink-0 text-slate-300">
+        <button
+          type="button"
+          onClick={abrirPrevia}
+          title="Prévia rápida"
+          aria-label={`Prévia da requisição #${req.codigo_requisicao}`}
+          className="shrink-0 h-9 w-9 rounded-lg border border-slate-200 bg-white text-slate-600 flex items-center justify-center hover:bg-teal-50 hover:text-teal-700 hover:border-teal-200 transition-colors"
+        >
+          <Eye className="w-4 h-4" />
+        </button>
+
+        <div className="shrink-0 text-slate-300 -ml-2">
           <ChevronRight className="w-5 h-5" />
         </div>
       </CardContent>
     </Card>
+
+    {previa && (
+      <PreviaRequisicao
+        req={req}
+        aberta={previa}
+        aoFechar={() => setPrevia(false)}
+        emAtendimento={isLockedByOther}
+        pilulas={pilulaLancamento}
+      />
+    )}
+    </>
   );
 });

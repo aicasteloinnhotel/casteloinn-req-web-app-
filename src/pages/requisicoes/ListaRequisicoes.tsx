@@ -1,8 +1,9 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { format, startOfDay, endOfDay } from "date-fns";
 import { contemTexto, dataInputParaLocal, precisaLancar } from "@/lib/utils";
+import { lerFiltros, salvarFiltros } from "@/lib/filtrosRequisicoes";
 import { Button } from "@/components/ui/button";
 import { Plus, RefreshCcw, Filter, ArrowLeft, ClipboardList, ClipboardCheck } from "lucide-react";
 import { hasSupabaseKeys } from "@/lib/supabase";
@@ -13,7 +14,10 @@ import { Input } from "@/components/ui/input";
 export default function ListaRequisicoes() {
   const { user } = useAuth();
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
+  // Filtros guardados neste menu: voltar de uma requisição ou dar F5 não os
+  // perde. Somem ao ir para outro menu (ver filtrosRequisicoes.ts).
+  const [salvos] = useState(() => lerFiltros(user?.id));
 
   const {
     reqs,
@@ -29,21 +33,51 @@ export default function ListaRequisicoes() {
   type FiltroRapido = "TODAS" | "PENDENTE" | "SEPARANDO" | "FINALIZADA" | "CANCELADA" | "AGUARDANDO" | "RUPTURAS";
   const FILTROS_VALIDOS: FiltroRapido[] = ["TODAS", "PENDENTE", "SEPARANDO", "FINALIZADA", "CANCELADA", "AGUARDANDO", "RUPTURAS"];
 
+  // Atalho do painel (?filter=aguardando) vale mais que o filtro guardado.
   const filtroDaUrl = (searchParams.get("filter") || "").toUpperCase() as FiltroRapido;
-  const initialFilter: FiltroRapido = FILTROS_VALIDOS.includes(filtroDaUrl) ? filtroDaUrl : "TODAS";
+  const statusSalvo = (salvos.status || "") as FiltroRapido;
+  const initialFilter: FiltroRapido = FILTROS_VALIDOS.includes(filtroDaUrl)
+    ? filtroDaUrl
+    : FILTROS_VALIDOS.includes(statusSalvo) ? statusSalvo : "TODAS";
   const [quickFilter, setQuickFilter] = useState<FiltroRapido>(initialFilter);
 
   // Lançamento no TOTVS. "A lançar" só faz sentido para o que já foi entregue:
   // uma requisição pendente também não está lançada, mas ainda não pode ser.
   type FiltroLancamento = "TODOS" | "A_LANCAR" | "LANCADAS";
-  const [filtroLancamento, setFiltroLancamento] = useState<FiltroLancamento>("TODOS");
   const ehAlmoxarifado = user?.perfil === "ALMOXARIFADO";
+  const [filtroLancamento, setFiltroLancamento] = useState<FiltroLancamento>(() =>
+    ehAlmoxarifado && (salvos.lancamento === "A_LANCAR" || salvos.lancamento === "LANCADAS")
+      ? salvos.lancamento
+      : "TODOS"
+  );
 
   // Advanced filters
-  const [showAdvanced, setShowAdvanced] = useState(false);
-  const [advDept, setAdvDept] = useState("");
-  const [advDateStart, setAdvDateStart] = useState("");
-  const [advDateEnd, setAdvDateEnd] = useState("");
+  const [advDept, setAdvDept] = useState(salvos.departamento || "");
+  const [advDateStart, setAdvDateStart] = useState(salvos.dataInicial || "");
+  const [advDateEnd, setAdvDateEnd] = useState(salvos.dataFinal || "");
+  // Painel aberto se ficou aberto, ou se há filtro nele: filtro escondido
+  // aplicado confunde ("cadê as requisições?").
+  const [showAdvanced, setShowAdvanced] = useState(
+    !!salvos.painelAberto || !!(salvos.departamento || salvos.dataInicial || salvos.dataFinal)
+  );
+
+  useEffect(() => {
+    salvarFiltros(user?.id, {
+      status: quickFilter,
+      lancamento: filtroLancamento,
+      departamento: advDept,
+      dataInicial: advDateStart,
+      dataFinal: advDateEnd,
+      painelAberto: showAdvanced,
+    });
+  }, [user?.id, quickFilter, filtroLancamento, advDept, advDateStart, advDateEnd, showAdvanced]);
+
+  // O atalho do painel já virou filtro guardado: tira da URL, senão um F5
+  // depois de trocar o filtro voltaria para o do atalho.
+  useEffect(() => {
+    if (searchParams.has("filter")) setSearchParams({}, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const requisicoes = useMemo(() => {
     let result = reqs;
@@ -126,7 +160,7 @@ export default function ListaRequisicoes() {
         {/* Uma barra só, tudo com 44px de altura.
             O seletor substituiu as pílulas: elas rolavam de lado e os status do
             fim sumiam da tela. Aqui nada some, e no celular abre o seletor do
-            próprio sistema. Começa sempre em "Todas". */}
+            próprio sistema. Começa em "Todas" ou no filtro guardado do menu. */}
         {/* No celular os dois seletores ficam numa linha e os botões na
             seguinte: espremer cinco controles em 375px cortava os rótulos. */}
         <div className="flex flex-col sm:flex-row sm:items-center gap-2 w-full sm:w-auto">

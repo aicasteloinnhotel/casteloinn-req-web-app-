@@ -502,8 +502,9 @@ export default function NovaRequisicao() {
               </div>
 
               {/* Unidade obrigatória e só as cadastradas para o material.
-                  Material com uma unidade só já vem escolhido. */}
-              <div className="w-full sm:w-36 shrink-0">
+                  Material com uma unidade só já vem escolhido. Largura para o
+                  nome mais comprido ("CART — Cartela"): com 144px ele cortava. */}
+              <div className="w-full sm:w-48 shrink-0">
                 <Label className="text-sm font-bold text-slate-700 mb-1 block">
                   Unidade <span className="text-red-600">*</span>
                 </Label>

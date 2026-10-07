@@ -1,5 +1,6 @@
 import React, { useEffect, Suspense, lazy } from 'react';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
+import { ehMenuRequisicoes, esquecerFiltros } from './lib/filtrosRequisicoes';
 import { AuthProvider } from './contexts/AuthContext';
 import { BloqueioProvider } from './contexts/BloqueioContext';
 import AppLayout from './components/layout/AppLayout';
@@ -29,6 +30,15 @@ const CarregandoTela = () => (
   </div>
 );
 
+/** Fora do menu Requisições (outro menu, login), os filtros da lista são esquecidos. */
+function EsquecerFiltrosForaDasRequisicoes() {
+  const { pathname } = useLocation();
+  useEffect(() => {
+    if (!ehMenuRequisicoes(pathname)) esquecerFiltros();
+  }, [pathname]);
+  return null;
+}
+
 export default function App() {
   useEffect(() => {
     const handleGlobalClick = (e: MouseEvent) => {
@@ -55,6 +65,7 @@ export default function App() {
       <BloqueioProvider>
       <BrowserRouter>
         <Toaster position="top-right" richColors />
+        <EsquecerFiltrosForaDasRequisicoes />
         <Routes>
           <Route path="/login" element={<Login />} />
           
