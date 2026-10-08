@@ -242,6 +242,11 @@ export default function AjudaSobre() {
                   )}
                 </li>
                 <li>
+                  Tem algo importante (prazo, evento, cuidado com algum item)? Escreva na caixa
+                  amarela de <strong>Observação</strong>, logo no começo. Ela aparece em destaque,
+                  no topo, para quem separa.
+                </li>
+                <li>
                   Digite o nome do material — não precisa de acento — ou toque no ícone de lista
                   para ver todos.
                 </li>
@@ -252,10 +257,15 @@ export default function AjudaSobre() {
                 </li>
                 <li>Toque em <strong>Adicionar ao Pedido</strong>. Repita para cada material.</li>
                 <li>
-                  Confira a lista (dá para mudar a quantidade ali mesmo), escreva uma observação se
-                  precisar e toque em <strong>Enviar Requisição</strong>.
+                  Confira a lista (dá para mudar a quantidade ali mesmo) e toque em{" "}
+                  <strong>Enviar Requisição</strong>.
                 </li>
               </Passos>
+              <p>
+                Esqueceu de avisar algo? Abra a requisição e toque em <strong>Editar</strong> na
+                caixa de observação (ou <strong>Adicionar observação</strong>), enquanto ela ainda
+                está pendente. O almoxarifado pode editar a qualquer momento.
+              </p>
               <Dica>
                 Se sair da tela no meio do pedido, os itens ficam guardados neste aparelho até você
                 voltar e enviar. Se aparecer “Novas requisições suspensas”, o almoxarifado está em

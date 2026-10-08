@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { Card, CardContent } from "@/components/ui/card";
 import { format } from "date-fns";
-import { ChevronRight, Lock, ClipboardCheck, ClipboardList, Eye, Search } from "lucide-react";
+import { ChevronRight, Lock, ClipboardCheck, ClipboardList, Eye, Search, MessageSquareWarning } from "lucide-react";
 import { PreviaRequisicao } from "@/components/PreviaRequisicao";
 import { useAuth } from "@/contexts/AuthContext";
 import { Requisicao } from "@/types";
@@ -14,6 +14,9 @@ import { useNavigate } from "react-router-dom";
 export const RequisicaoCard = React.memo(({ req, buscaItem }: { req: Requisicao; buscaItem?: string }) => {
   const navigate = useNavigate();
   const { user } = useAuth();
+
+  // Observação visível já na lista: dá para ver o aviso antes de abrir.
+  const obsNaLista = (req.observacao || "").trim();
   // A trava expira: sem checar o tempo, uma separação abandonada deixava o
   // selo "Em Atendimento" na lista para sempre.
   const isLockedByOther =
@@ -189,21 +192,35 @@ export const RequisicaoCard = React.memo(({ req, buscaItem }: { req: Requisicao;
         </div>
       </CardContent>
 
-      {/* O que a busca por item achou aqui. -mt-4 anula o espaçamento do
-          cartão: fica colado ao conteúdo, como parte dele. */}
-      {encontrados.length > 0 && (
-        <div className="-mt-4 px-4 lg:px-5 flex flex-wrap items-center gap-1.5">
-          <Search className="w-3.5 h-3.5 text-amber-700 shrink-0" />
-          {encontrados.slice(0, 3).map((l) => (
-            <span
-              key={l.id}
-              className="min-w-0 max-w-full text-[11px] font-semibold text-amber-900 bg-amber-50 border border-amber-200 rounded-md px-2 py-0.5 [overflow-wrap:anywhere]"
+      {/* Observação e o que a busca por item achou. -mt-4 anula o
+          espaçamento do cartão: fica colado ao conteúdo, como parte dele.
+          Âmbar só para a observação; a busca é azul, para não confundir. */}
+      {(obsNaLista || encontrados.length > 0) && (
+        <div className="-mt-4 px-4 lg:px-5 space-y-2">
+          {obsNaLista && (
+            <p
+              className="flex items-start gap-1.5 text-xs font-semibold text-amber-950 bg-amber-50 border border-amber-300 rounded-md px-2 py-1"
+              title={obsNaLista}
             >
-              {formatItemName(l.item?.nome)} · <span className="font-black">{qtdDaLinha(l)}</span>
-            </span>
-          ))}
-          {encontrados.length > 3 && (
-            <span className="text-[11px] font-bold text-slate-500">+{encontrados.length - 3}</span>
+              <MessageSquareWarning className="w-3.5 h-3.5 mt-px shrink-0 text-amber-700" />
+              <span className="min-w-0 line-clamp-2 [overflow-wrap:anywhere]">{obsNaLista}</span>
+            </p>
+          )}
+          {encontrados.length > 0 && (
+            <div className="flex flex-wrap items-center gap-1.5">
+              <Search className="w-3.5 h-3.5 text-sky-700 shrink-0" />
+              {encontrados.slice(0, 3).map((l) => (
+                <span
+                  key={l.id}
+                  className="min-w-0 max-w-full text-[11px] font-semibold text-sky-900 bg-sky-50 border border-sky-200 rounded-md px-2 py-0.5 [overflow-wrap:anywhere]"
+                >
+                  {formatItemName(l.item?.nome)} · <span className="font-black">{qtdDaLinha(l)}</span>
+                </span>
+              ))}
+              {encontrados.length > 3 && (
+                <span className="text-[11px] font-bold text-slate-500">+{encontrados.length - 3}</span>
+              )}
+            </div>
           )}
         </div>
       )}

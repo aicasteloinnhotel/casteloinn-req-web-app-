@@ -1,7 +1,8 @@
 import React from "react";
 import { format } from "date-fns";
 import { useNavigate } from "react-router-dom";
-import { Eye, Lock, MessageSquareText } from "lucide-react";
+import { Eye, Lock } from "lucide-react";
+import { ObservacaoDestaque } from "@/components/ObservacaoDestaque";
 import {
   Dialog,
   DialogContent,
@@ -63,6 +64,9 @@ export function PreviaRequisicao({
         </DialogHeader>
 
         <div className="p-4 overflow-y-auto overscroll-contain flex-1 min-h-0 space-y-4">
+          {/* Acima de tudo: é onde vem o aviso que evita erro. */}
+          <ObservacaoDestaque observacao={req.observacao} />
+
           <dl className="grid grid-cols-2 gap-x-4 gap-y-3">
             <div className="min-w-0">
               <dt className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Departamento</dt>
@@ -84,21 +88,10 @@ export function PreviaRequisicao({
             </div>
           </dl>
 
-          {/* Complementar não ganha aviso próprio: a observação dela já diz
-              "gerada automaticamente por ruptura da REQ #...". */}
           {emAtendimento && (
             <p className="text-xs font-semibold text-rose-800 bg-rose-50 border border-rose-200 rounded-lg px-3 py-2 flex items-center gap-1.5">
               <Lock className="h-3.5 w-3.5 shrink-0" /> Em atendimento por outro operador agora.
             </p>
-          )}
-
-          {req.observacao?.trim() && (
-            <div className="text-sm text-slate-700 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
-              <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1 mb-0.5">
-                <MessageSquareText className="h-3 w-3" /> Observação
-              </p>
-              <p className="whitespace-pre-line [overflow-wrap:anywhere]">{req.observacao}</p>
-            </div>
           )}
 
           <div className="border border-slate-200 rounded-lg overflow-hidden">
@@ -116,7 +109,7 @@ export function PreviaRequisicao({
                 return (
                   <li
                     key={linha.id}
-                    className={`flex items-start justify-between gap-3 px-3 py-2.5 ${buscado ? "bg-amber-50" : ""}`}
+                    className={`flex items-start justify-between gap-3 px-3 py-2.5 ${buscado ? "bg-sky-50" : ""}`}
                   >
                     <span className="min-w-0 text-sm font-semibold text-slate-800 uppercase [overflow-wrap:anywhere]">
                       {formatItemName(linha.item?.nome) || "Item removido"}

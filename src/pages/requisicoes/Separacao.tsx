@@ -24,6 +24,7 @@ import {
   renovarLockRequisicao,
   LOCK_TTL_MS
 } from "@/services/api";
+import { ObservacaoDestaque } from "@/components/ObservacaoDestaque";
 import { atualizarQuantidadeReposicao } from "@/services/reposicao";
 import { Requisicao, Item, RequisicaoItemComDetalhes } from "@/types";
 import { toast } from "@/lib/toast";
@@ -536,8 +537,7 @@ export default function Separacao() {
               <StatusBadge status={req.status} />
             </div>
             <p className="text-[11px] sm:text-sm text-slate-700 font-medium leading-tight mt-1 break-words whitespace-normal">
-              {req.departamento} • {req.usuario?.nome} 
-              {req.observacao && <span className="text-orange-600 font-bold ml-1">Obs: {req.observacao}</span>}
+              {req.departamento} • {req.usuario?.nome}
             </p>
           </div>
         </div>
@@ -551,6 +551,11 @@ export default function Separacao() {
           </Button>
         </div>
       </div>
+
+      {/* Observação logo abaixo do cabeçalho, antes do primeiro item: era um
+          "Obs:" pequeno no meio do cabeçalho e passava batido na hora de separar.
+          Compacta e com rolagem própria, para não tomar o espaço da lista. */}
+      <ObservacaoDestaque observacao={req.observacao} compacto className="mx-2 sm:mx-4 mt-2 shrink-0" />
 
       {/* Lista de Itens. Ocupa o espaço que sobra entre o cabeçalho e o rodapé:
           antes o rodapé ficava POR CIMA da lista, e numa requisição grande o

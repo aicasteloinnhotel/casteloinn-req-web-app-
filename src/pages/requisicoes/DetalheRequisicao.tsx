@@ -26,6 +26,7 @@ import {
   registrarDevolucao,
   desfazerDevolucao
 } from "@/services/api";
+import { ObservacaoDestaque } from "@/components/ObservacaoDestaque";
 import { playSound } from "@/lib/sounds";
 import { Requisicao, Historico, Devolucao } from "@/types";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -90,6 +91,7 @@ const ROTULOS_HISTORICO: Record<string, string> = {
   LANCAMENTO_DESFEITO: "LANÇAMENTO DESFEITO",
   DEVOLUCAO: "DEVOLUÇÃO AO ALMOXARIFADO",
   DEVOLUCAO_DESFEITA: "DEVOLUÇÃO DESFEITA",
+  OBSERVACAO_EDITADA: "OBSERVAÇÃO EDITADA",
 };
 
 /** "1,2" ou "1.2" → 1.2. No celular a vírgula é o que se digita. */
@@ -386,8 +388,34 @@ export default function DetalheRequisicao() {
 
     const totalPagesExp = "{total_pages_count_string}";
 
+    // Observação ANTES dos itens, numa caixa: é o aviso do setor, e no fim da
+    // folha ninguém lia.
+    const observacao = (req.observacao || "").trim();
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9);
+    const linhasObs: string[] = observacao ? doc.splitTextToSize(observacao, 174) : [];
+    let inicioDaTabela = 45;
+    if (linhasObs.length > 0) {
+      const topo = 39;
+      const altura = 9 + linhasObs.length * 4;
+      doc.setFillColor(255, 248, 225);
+      doc.setDrawColor(217, 160, 40);
+      doc.setLineWidth(0.4);
+      doc.rect(14, topo, 182, altura, "FD");
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(8.5);
+      doc.text("OBSERVAÇÃO", 17, topo + 5);
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(9);
+      doc.text(linhasObs, 17, topo + 9.5);
+      inicioDaTabela = topo + altura + 5;
+    }
+
     autoTable(doc, {
-      startY: 45,
+      startY: inicioDaTabela,
+      // Da 2ª página em diante a tabela começa abaixo do cabeçalho (que é
+      // redesenhado em toda página); antes ela subia por cima dele.
+      margin: { top: 40 },
       head,
       body,
       theme: 'grid',
@@ -505,19 +533,8 @@ export default function DetalheRequisicao() {
     );
     finalY += 9;
 
-    if (req.observacao) {
-      if (finalY > 260) {
-        doc.addPage();
-        finalY = 45;
-      }
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(9);
-      doc.text("Observações:", 14, finalY);
-      doc.setFont("helvetica", "normal");
-      doc.text(`${req.observacao}`, 14, finalY + 5, { maxWidth: 180 });
-      finalY += 15 + (doc.splitTextToSize(req.observacao, 180).length * 4);
-    }
-    
+    // A observação foi para o topo, antes da tabela.
+
     // Termo de recebimento + assinaturas (somente na última página)
     const alturaTermo = req.termo_aceito_em ? 24 : 0;
     if (finalY + alturaTermo > 240) {
@@ -719,6 +736,27 @@ export default function DetalheRequisicao() {
       toast.error(e?.message || "Não foi possível desfazer a devolução.");
     } finally {
       setUpdating(false);
+    }
+  };
+
+  // Observação editável quando quiser. O histórico guarda o antes e o depois,
+  // para ninguém ficar sem saber o que estava escrito.
+  const handleSalvarObservacao = async (texto: string) => {
+    if (!req || !user) return;
+    const antes = (req.observacao || "").trim();
+    try {
+      await updateRequisicaoInfo(req.id, { observacao: texto });
+      await addHistorico(
+        req.id,
+        "OBSERVACAO_EDITADA",
+        user.id,
+        `Antes: ${antes || "(sem observação)"}\nAgora: ${texto || "(sem observação)"}`,
+      );
+      toast.success(texto ? "Observação salva." : "Observação removida.");
+      await carregarDetalhes(req.id);
+    } catch (e: any) {
+      toast.error(`Não foi possível salvar a observação: ${e?.message || "erro de comunicação"}`);
+      throw e;
     }
   };
 
@@ -937,6 +975,13 @@ export default function DetalheRequisicao() {
           </div>
         )}
       </div>
+
+      {/* Observação acima de tudo: é onde o setor avisa o que evita erro.
+          O almoxarifado edita quando quiser; quem pediu, enquanto está pendente. */}
+      <ObservacaoDestaque
+        observacao={req.observacao}
+        aoSalvar={ehAlmoxarifado || (ehDono && req.status === "PENDENTE") ? handleSalvarObservacao : undefined}
+      />
 
       {/* Vínculos: origem e/ou complementar. Podem existir os dois ao mesmo tempo. */}
       {rel && (
@@ -1190,18 +1235,7 @@ export default function DetalheRequisicao() {
             )}
           </div>
 
-          {req.observacao && (
-            <Card className="print:shadow-none print:border-black border-none bg-red-50/50">
-              <CardContent className="p-4 sm:p-5">
-                <h3 className="font-bold text-red-800 text-sm uppercase tracking-wider mb-2">
-                  Observações do Solicitante
-                </h3>
-                <p className="text-sm text-red-950 whitespace-pre-wrap">
-                  {req.observacao}
-                </p>
-              </CardContent>
-            </Card>
-          )}
+          {/* A observação subiu para o topo da página (ObservacaoDestaque). */}
 
           {/* Botões de Ação para Almoxarife/Gerente */}
           {podeAlterarStatus && (

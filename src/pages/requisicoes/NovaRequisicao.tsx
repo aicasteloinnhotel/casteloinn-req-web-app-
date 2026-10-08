@@ -16,7 +16,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { Trash2, Plus, Minus, ArrowLeft, Search, List, PauseCircle } from "lucide-react";
+import { Trash2, Plus, Minus, ArrowLeft, Search, List, PauseCircle, MessageSquareWarning } from "lucide-react";
 import { toast } from "@/lib/toast";
 import { playSound } from "@/lib/sounds";
 import { contemTexto, formatItemName, UNIDADE_PADRAO } from "@/lib/utils";
@@ -388,6 +388,23 @@ export default function NovaRequisicao() {
             </CardContent>
           </Card>
         )}
+
+        {/* Observação no topo, à vista desde o começo: no fim do formulário,
+            só aparecia depois do primeiro item e passava batido. É nela que
+            vem o aviso que evita erro na separação. */}
+        <div className="rounded-xl border-2 border-amber-300 bg-amber-50 p-4 space-y-2">
+          <Label htmlFor="observacao-pedido" className="flex items-center gap-1.5 text-sm font-bold text-amber-900">
+            <MessageSquareWarning className="h-4 w-4 shrink-0" /> Observação (opcional)
+          </Label>
+          <Textarea
+            id="observacao-pedido"
+            placeholder="Algo que o almoxarifado precisa saber? Ex.: entregar só amanhã; é para o evento de hoje à noite..."
+            className="min-h-[72px] border-amber-300 resize-y bg-white p-3 text-base"
+            value={observacao}
+            onChange={(e) => setObservacao(e.target.value)}
+          />
+        </div>
+
         <Card className="shadow-xl shadow-slate-200/60 border-slate-200/60 border-slate-200">
           <CardContent className="p-4 sm:p-6 space-y-4">
             <div className="space-y-3">
@@ -629,17 +646,7 @@ export default function NovaRequisicao() {
               ))}
             </div>
 
-            <div className="pt-4 space-y-2">
-              <Label className="font-semibold text-slate-700">
-                Observações (opcional)
-              </Label>
-              <Textarea
-                placeholder="Exemplo: Necessidade urgente para o evento de hoje à noite..."
-                className="min-h-[100px] border-slate-300 resize-none bg-white p-3"
-                value={observacao}
-                onChange={(e) => setObservacao(e.target.value)}
-              />
-            </div>
+            {/* A observação subiu para o topo do formulário. */}
 
             <Button
               className="w-full h-14 bg-teal-900 hover:bg-teal-950 active:scale-[0.98] transition-all text-white font-bold text-lg rounded-xl shadow-lg mt-6"

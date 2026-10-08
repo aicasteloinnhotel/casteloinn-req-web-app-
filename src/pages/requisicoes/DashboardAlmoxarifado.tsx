@@ -23,7 +23,7 @@ import { calcularSaidas } from "@/lib/saidas";
 import { StatusBadge } from "@/components/StatusBadge";
 import { BotaoSuspenderRequisicoes } from "@/components/PausaInventario";
 import { useBloqueio } from "@/contexts/BloqueioContext";
-import { Calendar, Users, Hourglass, ShoppingCart, BarChart3, ClipboardList, Printer, AlertTriangle, Truck } from "lucide-react";
+import { Calendar, Users, Hourglass, ShoppingCart, BarChart3, ClipboardList, Printer, AlertTriangle, Truck, MessageSquareWarning } from "lucide-react";
 
 
 interface GroupedItem {
@@ -548,6 +548,13 @@ export default function DashboardAlmoxarifado({
                     <p className="text-xs text-slate-500 mt-0.5">
                       {req.itens?.length || 0} {req.itens?.length === 1 ? "item" : "itens"} • {format(parseISO(req.created_at), "dd/MM/yy HH:mm")}
                     </p>
+                    {/* Observação à vista antes de abrir: é onde vem o aviso. */}
+                    {req.observacao?.trim() && (
+                      <p className="mt-1.5 flex items-start gap-1.5 text-xs font-semibold text-amber-950 bg-amber-50 border border-amber-300 rounded-md px-2 py-1">
+                        <MessageSquareWarning className="w-3.5 h-3.5 mt-px shrink-0 text-amber-700" />
+                        <span className="min-w-0 line-clamp-2 [overflow-wrap:anywhere]">{req.observacao.trim()}</span>
+                      </p>
+                    )}
                   </div>
                 </button>
               )) : (
@@ -583,7 +590,19 @@ export default function DashboardAlmoxarifado({
                       <td className="py-2.5 font-bold text-slate-800">#{req.codigo_requisicao}</td>
                       {/* Sem max-w fixo: a coluna agora tem 143px reais e o
                           limite de 100px cortava nomes à toa. Deixa quebrar. */}
-                      <td className="py-2.5 pr-2 text-slate-800 font-semibold break-words">{req.departamento}</td>
+                      <td className="py-2.5 pr-2 text-slate-800 font-semibold break-words">
+                        {req.departamento}
+                        {/* Observação à vista, embaixo do setor; inteira ao passar o mouse. */}
+                        {req.observacao?.trim() && (
+                          <span
+                            className="mt-1 flex items-start gap-1 text-xs font-semibold text-amber-900"
+                            title={req.observacao.trim()}
+                          >
+                            <MessageSquareWarning className="w-3.5 h-3.5 mt-px shrink-0 text-amber-700" />
+                            <span className="min-w-0 line-clamp-2 [overflow-wrap:anywhere]">{req.observacao.trim()}</span>
+                          </span>
+                        )}
+                      </td>
                       <td className="py-2.5 pr-2 text-slate-700 font-medium break-words">{req.usuario?.nome || "Sistema"}</td>
                       <td className="py-2.5 text-center text-slate-700 font-bold">{req.itens?.length || 0}</td>
                       <td className="py-2.5 text-slate-600 text-xs font-medium">{format(parseISO(req.created_at), "dd/MM/yy HH:mm")}</td>
