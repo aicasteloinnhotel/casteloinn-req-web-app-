@@ -37,8 +37,10 @@ import {
   Maximize2,
   Minimize2,
   Pencil,
-  Trash2
+  Trash2,
+  FileSpreadsheet
 } from "lucide-react";
+import { formatarQtd } from "@/lib/unidades";
 import { format, addDays, addWeeks, endOfDay } from "date-fns";
 import { toast } from "@/lib/toast";
 import jsPDF from "jspdf";
@@ -549,6 +551,40 @@ export default function ListaReposicao() {
     }
   };
 
+  /**
+   * Copia a lista no formato da planilha de cotação (aba MODELO): PRODUTO,
+   * MARCA (em branco), UND e QTD, separados por tabulação. Clica em B3, cola,
+   * e as quatro colunas entram de uma vez. Material em duas unidades
+   * (1 UN + 2 CX) vira duas linhas: a planilha tem uma unidade por linha.
+   */
+  const handleCopiarParaCotacao = async () => {
+    const linhas: string[] = [];
+    for (const group of groupedItems) {
+      const nome = formatItemName(group.item?.nome) || "Item";
+      const porUnidade = new Map<string, number>();
+      for (const l of [...group.manual_items, ...group.rupturas]) {
+        const un = (l.unidade || group.item?.unidade || "UN").toUpperCase();
+        porUnidade.set(un, (porUnidade.get(un) || 0) + (Number(l.quantidade) || 0));
+      }
+      for (const [un, qtd] of porUnidade) {
+        linhas.push([nome, "", un, formatarQtd(qtd)].join("\t"));
+      }
+    }
+    if (linhas.length === 0) {
+      toast.info("A lista de reposição está vazia.");
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(linhas.join("\r\n"));
+      toast.success(
+        `${linhas.length} ${linhas.length === 1 ? "linha copiada" : "linhas copiadas"}. Na planilha, clique em B3 e cole (Ctrl+V).` +
+          (linhas.length > 32 ? " A aba MODELO tem 32 linhas: insira mais antes de colar." : ""),
+      );
+    } catch {
+      toast.error("O navegador não liberou a cópia. Tente de novo.");
+    }
+  };
+
   const handlePrint = () => {
     const doc = new jsPDF({ compress: true });
     
@@ -921,6 +957,17 @@ export default function ListaReposicao() {
               className={BOTAO_ICONE}
             >
               <Printer className="w-4 h-4" />
+            </Button>
+            {/* Cola direto na planilha de cotação: produto, marca, und, qtd. */}
+            <Button
+              onClick={handleCopiarParaCotacao}
+              type="button"
+              variant="outline"
+              title="Copiar para a planilha de cotação"
+              aria-label="Copiar para a planilha de cotação"
+              className={BOTAO_ICONE}
+            >
+              <FileSpreadsheet className="w-4 h-4" />
             </Button>
             <Button
               onClick={() => setShowHistoryModal(true)}

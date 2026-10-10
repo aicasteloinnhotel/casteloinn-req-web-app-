@@ -468,6 +468,11 @@ export default function AjudaSobre() {
                     quantidade. O ícone de relógio mostra o histórico de baixas, e a impressora gera
                     a lista para cotação.
                   </p>
+                  <p>
+                    O ícone de <strong>planilha</strong> copia a lista no formato da planilha de
+                    cotação (produto, marca, unidade e quantidade): na planilha, clique em{" "}
+                    <strong>B3</strong> e cole com Ctrl+V.
+                  </p>
                 </Topico>
 
                 <Topico icone={<Package />} titulo="Cadastro de itens">
