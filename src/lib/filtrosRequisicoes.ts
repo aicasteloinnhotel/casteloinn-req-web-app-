@@ -8,6 +8,8 @@
  */
 
 export type FiltrosRequisicoes = {
+  /** Número da requisição (72 ou #72). */
+  numero: string;
   /** Busca por material: só as requisições que têm esse item. */
   item: string;
   status: string;

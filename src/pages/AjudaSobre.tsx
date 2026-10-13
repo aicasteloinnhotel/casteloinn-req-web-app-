@@ -284,6 +284,12 @@ export default function AjudaSobre() {
                   passo.
                 </li>
               </Passos>
+              <p>
+                Procurando uma requisição? No funil (<strong>filtros</strong>) dá para buscar pelo{" "}
+                <strong>número</strong>, por item, departamento e data. Os filtros ligados aparecem
+                acima da lista; <strong>Limpar filtros</strong> tira todos de uma vez. O botão de
+                setas atualiza a lista na hora.
+              </p>
               <p>O significado de cada cor está em “O que significa cada status”, mais abaixo.</p>
             </Topico>
 
@@ -514,6 +520,11 @@ export default function AjudaSobre() {
                     Prefira <strong>Desativar</strong> a excluir: a pessoa perde o acesso, mas o nome
                     continua nos pedidos antigos. O sistema nunca fica sem um usuário do
                     Almoxarifado ativo.
+                  </p>
+                  <p>
+                    O ícone de <strong>planilha</strong> exporta todos os usuários (login,
+                    departamento, perfil e se está ativo) para copiar ou baixar e mandar ao RH. A
+                    senha não vai junto: o sistema não guarda as senhas.
                   </p>
                 </Topico>
               </>

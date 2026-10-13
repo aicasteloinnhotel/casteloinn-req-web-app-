@@ -5,7 +5,7 @@ import { format, startOfDay, endOfDay } from "date-fns";
 import { contemTexto, dataInputParaLocal, formatItemName, precisaLancar } from "@/lib/utils";
 import { lerFiltros, salvarFiltros } from "@/lib/filtrosRequisicoes";
 import { Button } from "@/components/ui/button";
-import { Plus, RefreshCcw, Filter, ArrowLeft, ClipboardList, ClipboardCheck } from "lucide-react";
+import { Plus, RefreshCcw, Filter, FilterX, X, ArrowLeft, ClipboardList, ClipboardCheck } from "lucide-react";
 import { hasSupabaseKeys } from "@/lib/supabase";
 import { useRequisicoesSync } from "@/hooks/useRequisicoesSync";
 import { RequisicaoCard } from "@/components/RequisicaoCard";
@@ -58,7 +58,8 @@ export default function ListaRequisicoes() {
   // Painel aberto se ficou aberto, ou se há filtro nele: filtro escondido
   // aplicado confunde ("cadê as requisições?").
   const [showAdvanced, setShowAdvanced] = useState(
-    !!salvos.painelAberto || !!(salvos.item || salvos.departamento || salvos.dataInicial || salvos.dataFinal)
+    !!salvos.painelAberto ||
+      !!(salvos.numero || salvos.item || salvos.departamento || salvos.dataInicial || salvos.dataFinal)
   );
 
   // Busca por material: mostra as requisições que têm esse item, somada aos
@@ -67,8 +68,14 @@ export default function ListaRequisicoes() {
   const [buscaItem, setBuscaItem] = useState(salvos.item || "");
   const buscaItemAdiada = useDeferredValue(buscaItem.trim());
 
+  // Número da requisição: "72" ou "#72" acha só a #72 (exato: digitar 7 não
+  // traz a #17, a #70...).
+  const [buscaNumero, setBuscaNumero] = useState(salvos.numero || "");
+  const numeroBuscado = buscaNumero.replace(/\D/g, "");
+
   useEffect(() => {
     salvarFiltros(user?.id, {
+      numero: buscaNumero,
       item: buscaItem,
       status: quickFilter,
       lancamento: filtroLancamento,
@@ -77,7 +84,7 @@ export default function ListaRequisicoes() {
       dataFinal: advDateEnd,
       painelAberto: showAdvanced,
     });
-  }, [user?.id, buscaItem, quickFilter, filtroLancamento, advDept, advDateStart, advDateEnd, showAdvanced]);
+  }, [user?.id, buscaNumero, buscaItem, quickFilter, filtroLancamento, advDept, advDateStart, advDateEnd, showAdvanced]);
 
   // O atalho do painel já virou filtro guardado: tira da URL, senão um F5
   // depois de trocar o filtro voltaria para o do atalho.
@@ -126,24 +133,40 @@ export default function ListaRequisicoes() {
       result = result.filter(r => new Date(r.created_at).getTime() <= end);
     }
 
-    // Por material, por último: vale junto com todos os filtros acima.
+    // Por material e por número, por último: valem junto com os filtros acima.
     if (buscaItemAdiada) {
       result = result.filter(r =>
         (r.itens || []).some(l => contemTexto(formatItemName(l.item?.nome), buscaItemAdiada))
       );
     }
+    if (numeroBuscado) {
+      result = result.filter(r => String(r.codigo_requisicao ?? "") === numeroBuscado);
+    }
 
     return result;
-  }, [reqs, quickFilter, filtroLancamento, advDept, advDateStart, advDateEnd, buscaItemAdiada]);
+  }, [reqs, quickFilter, filtroLancamento, advDept, advDateStart, advDateEnd, buscaItemAdiada, numeroBuscado]);
 
-  // Algum filtro além da busca por item? É o que avisa "nos filtros atuais".
+  // Algum filtro além das buscas (item, número)? É o que avisa "nos filtros atuais".
   const outrosFiltrosAtivos =
     quickFilter !== "TODAS" || filtroLancamento !== "TODOS" ||
     !!advDept.trim() || !!advDateStart || !!advDateEnd;
 
+  /** Tira os outros filtros e mantém a busca (por número, ou por item). */
   const limparOutrosFiltros = () => {
     setQuickFilter("TODAS");
     setFiltroLancamento("TODOS");
+    setAdvDept("");
+    setAdvDateStart("");
+    setAdvDateEnd("");
+    // Procurando um número, o item também atrapalha.
+    if (numeroBuscado) setBuscaItem("");
+  };
+
+  const limparTodosOsFiltros = () => {
+    setQuickFilter("TODAS");
+    setFiltroLancamento("TODOS");
+    setBuscaNumero("");
+    setBuscaItem("");
     setAdvDept("");
     setAdvDateStart("");
     setAdvDateEnd("");
@@ -158,6 +181,33 @@ export default function ListaRequisicoes() {
     { label: "Rupturas", value: "RUPTURAS" },
     { label: "Canceladas", value: "CANCELADA" }
   ];
+
+  // Cada filtro ligado vira uma etiqueta acima da lista, com o X dele. Com os
+  // filtros guardados entre telas, era fácil esquecer que um estava ligado.
+  const dataCurta = (valor: string) => {
+    const d = dataInputParaLocal(valor);
+    return d ? format(d, "dd/MM/yy") : valor;
+  };
+  const filtrosLigados: { chave: string; rotulo: string; limpar: () => void }[] = [];
+  if (quickFilter !== "TODAS") {
+    filtrosLigados.push({
+      chave: "status",
+      rotulo: quickFilterOptions.find((o) => o.value === quickFilter)?.label || quickFilter,
+      limpar: () => setQuickFilter("TODAS"),
+    });
+  }
+  if (filtroLancamento !== "TODOS") {
+    filtrosLigados.push({
+      chave: "lancamento",
+      rotulo: filtroLancamento === "A_LANCAR" ? "A lançar" : "Lançadas",
+      limpar: () => setFiltroLancamento("TODOS"),
+    });
+  }
+  if (numeroBuscado) filtrosLigados.push({ chave: "numero", rotulo: `Nº #${numeroBuscado}`, limpar: () => setBuscaNumero("") });
+  if (buscaItem.trim()) filtrosLigados.push({ chave: "item", rotulo: `Item: ${buscaItem.trim()}`, limpar: () => setBuscaItem("") });
+  if (advDept.trim()) filtrosLigados.push({ chave: "dept", rotulo: `Setor: ${advDept.trim()}`, limpar: () => setAdvDept("") });
+  if (advDateStart) filtrosLigados.push({ chave: "de", rotulo: `De ${dataCurta(advDateStart)}`, limpar: () => setAdvDateStart("") });
+  if (advDateEnd) filtrosLigados.push({ chave: "ate", rotulo: `Até ${dataCurta(advDateEnd)}`, limpar: () => setAdvDateEnd("") });
 
   return (
     <div className="space-y-6 max-w-5xl mx-auto pb-10">
@@ -266,9 +316,9 @@ export default function ListaRequisicoes() {
             <Button
               variant="outline"
               onClick={() => setShowAdvanced(!showAdvanced)}
-              title="Filtrar por item, departamento e período"
+              title="Filtrar por número, item, departamento e período"
               className={`h-11 w-11 p-0 shrink-0 border-slate-200 ${
-                showAdvanced || buscaItem || advDept || advDateStart || advDateEnd
+                showAdvanced || buscaNumero || buscaItem || advDept || advDateStart || advDateEnd
                   ? "bg-teal-50 text-teal-700 border-teal-200"
                   : "bg-white text-slate-600 hover:text-slate-900"
               }`}
@@ -293,7 +343,25 @@ export default function ListaRequisicoes() {
             mora aqui, junto dos outros: como barra própria, larga, ela pesava
             mais na tela do que os filtros que importam mais. */}
         {showAdvanced && (
-          <div className={`bg-white rounded-xl border border-slate-200 shadow-lg shadow-slate-200/50 p-4 grid grid-cols-1 ${user?.perfil !== "SOLICITANTE" ? "sm:grid-cols-2 lg:grid-cols-4" : "sm:grid-cols-3"} gap-4`}>
+          // Nº é curto: coluna estreita no computador; o resto divide o espaço.
+          <div className={`bg-white rounded-xl border border-slate-200 shadow-lg shadow-slate-200/50 p-4 grid grid-cols-1 sm:grid-cols-2 gap-4 ${
+            user?.perfil !== "SOLICITANTE"
+              ? "lg:grid-cols-[7rem_minmax(0,1fr)_minmax(0,1fr)_minmax(0,10rem)_minmax(0,10rem)]"
+              : "lg:grid-cols-[7rem_minmax(0,1fr)_minmax(0,10rem)_minmax(0,10rem)]"
+          }`}>
+            <div>
+              <label htmlFor="filtro-numero" className="text-[10px] font-bold text-slate-700 uppercase tracking-wider mb-1 block">Nº</label>
+              <Input
+                id="filtro-numero"
+                type="search"
+                inputMode="numeric"
+                placeholder="Ex.: 72"
+                aria-label="Buscar pelo número da requisição"
+                className="h-9 text-sm"
+                value={buscaNumero}
+                onChange={e => setBuscaNumero(e.target.value.replace(/[^\d#]/g, ""))}
+              />
+            </div>
             {/* "detergente" mostra só as requisições que pediram detergente,
                 somado aos outros filtros ligados. */}
             <div>
@@ -339,8 +407,35 @@ export default function ListaRequisicoes() {
           </div>
         )}
 
+        {/* Filtros ligados, cada um com o seu X, e o "Limpar filtros" que
+            zera tudo de uma vez. Só aparece quando há filtro. */}
+        {filtrosLigados.length > 0 && (
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs font-semibold text-slate-500">Filtros:</span>
+            {filtrosLigados.map((f) => (
+              <button
+                key={f.chave}
+                type="button"
+                onClick={f.limpar}
+                title="Tirar este filtro"
+                className="inline-flex max-w-full items-center gap-1 h-7 pl-2.5 pr-1.5 rounded-full border border-teal-200 bg-teal-50 text-xs font-semibold text-teal-800 hover:bg-teal-100 transition-colors"
+              >
+                <span className="truncate">{f.rotulo}</span>
+                <X className="h-3.5 w-3.5 shrink-0 opacity-70" />
+              </button>
+            ))}
+            <button
+              type="button"
+              onClick={limparTodosOsFiltros}
+              className="ml-auto inline-flex items-center gap-1.5 h-8 px-3 rounded-lg border border-slate-200 bg-white text-xs font-bold text-slate-700 shadow-sm hover:bg-red-50 hover:text-red-700 hover:border-red-200 transition-colors"
+            >
+              <FilterX className="h-4 w-4" /> Limpar filtros
+            </button>
+          </div>
+        )}
+
         {/* Com zero, quem fala é o aviso de lista vazia lá embaixo. */}
-        {buscaItemAdiada && !loading && requisicoes.length > 0 && (
+        {buscaItemAdiada && !numeroBuscado && !loading && requisicoes.length > 0 && (
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-600">
             <span>
               <strong className="text-slate-800">{requisicoes.length}</strong>{" "}
@@ -369,19 +464,31 @@ export default function ListaRequisicoes() {
       ) : requisicoes.length === 0 ? (
         <div className="text-center py-16 bg-slate-50 rounded-xl border border-slate-200/80 shadow-md shadow-slate-200/50 border-dashed">
           <p className="text-slate-700 mb-4 font-medium px-4 [overflow-wrap:anywhere]">
-            {buscaItemAdiada
-              ? `Nenhuma requisição com “${buscaItemAdiada}”${outrosFiltrosAtivos ? " nos filtros atuais" : ""}.`
-              : "Nenhuma requisição encontrada com os filtros atuais."}
+            {numeroBuscado
+              ? (outrosFiltrosAtivos || buscaItemAdiada)
+                ? `A requisição #${numeroBuscado} não aparece com os filtros atuais.`
+                : `Nenhuma requisição #${numeroBuscado} encontrada.`
+              : buscaItemAdiada
+                ? `Nenhuma requisição com “${buscaItemAdiada}”${outrosFiltrosAtivos ? " nos filtros atuais" : ""}.`
+                : "Nenhuma requisição encontrada com os filtros atuais."}
           </p>
-          {/* Buscando um item com filtro ligado, o próximo passo natural é
-              procurar em todas; criar requisição não tem a ver. */}
-          {buscaItemAdiada && outrosFiltrosAtivos ? (
+          {/* Buscando um número ou um item com filtro ligado, o próximo passo
+              natural é procurar em todas; criar requisição não tem a ver. */}
+          {(numeroBuscado && (outrosFiltrosAtivos || buscaItemAdiada)) || (buscaItemAdiada && outrosFiltrosAtivos) ? (
             <Button
               variant="outline"
               onClick={limparOutrosFiltros}
               className="border-teal-600 text-teal-700 hover:bg-teal-50 font-bold"
             >
               Buscar em todas as requisições
+            </Button>
+          ) : filtrosLigados.length > 0 ? (
+            <Button
+              variant="outline"
+              onClick={limparTodosOsFiltros}
+              className="border-teal-600 text-teal-700 hover:bg-teal-50 font-bold"
+            >
+              <FilterX className="h-4 w-4 mr-2" /> Limpar filtros
             </Button>
           ) : (
             <Link to="/requisicoes/nova">

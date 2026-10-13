@@ -17,15 +17,17 @@ import { Label } from "@/components/ui/label";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Plus, Edit2, CheckCircle2, XCircle, Trash2 } from "lucide-react";
+import { Plus, Edit2, CheckCircle2, XCircle, Trash2, FileSpreadsheet, Copy, Download, KeyRound } from "lucide-react";
+import { format } from "date-fns";
 import { toast } from "@/lib/toast";
 import { hasSupabaseKeys } from "@/lib/supabase";
 import { CampoBusca } from "@/components/CampoBusca";
 import { contemTexto } from "@/lib/utils";
-import { BOTAO_PRIMARIO, SELETOR, SUBTITULO, TITULO } from "@/lib/estilos";
+import { BOTAO_ICONE, BOTAO_PRIMARIO, SELETOR, SUBTITULO, TITULO } from "@/lib/estilos";
 
 /** Traduz os erros do banco que fazem sentido para quem está cadastrando. */
 const mensagemDeErro = (err: any, padrao: string): string => {
@@ -183,6 +185,56 @@ export default function Usuarios() {
     }
   };
 
+  // Exportar para o RH: todos os usuários (não só os do filtro da tela), por
+  // setor e nome. Sem senha: o banco guarda só o código embaralhado (bcrypt),
+  // que não volta a ser a senha — nem para nós.
+  const [showExportar, setShowExportar] = useState(false);
+  const linhasExportacao = (): string[][] => {
+    const cabecalho = ["Login (nome)", "Departamento", "Perfil", "Situação", "Cadastrado em"];
+    const linhas = [...usuarios]
+      .sort((a, b) =>
+        (a.departamento || "").localeCompare(b.departamento || "", "pt-BR") ||
+        a.nome.localeCompare(b.nome, "pt-BR"),
+      )
+      .map((u) => [
+        u.nome,
+        u.departamento,
+        u.perfil === "ALMOXARIFADO" ? "Almoxarifado" : "Solicitante",
+        u.ativo ? "Ativo" : "Inativo",
+        u.created_at ? format(new Date(u.created_at), "dd/MM/yyyy") : "",
+      ]);
+    return [cabecalho, ...linhas];
+  };
+
+  const copiarUsuarios = async () => {
+    const texto = linhasExportacao().map((l) => l.join("\t")).join("\r\n");
+    try {
+      await navigator.clipboard.writeText(texto);
+      toast.success(`${usuarios.length} usuários copiados. Cole no Excel ou numa mensagem.`);
+      setShowExportar(false);
+    } catch {
+      toast.error("O navegador não liberou a cópia. Use \"Baixar planilha\".");
+    }
+  };
+
+  const baixarPlanilhaUsuarios = () => {
+    // CSV com ";" e marca UTF-8: é o que o Excel em português abre direto,
+    // com acentos e cada coisa na sua coluna.
+    const campo = (v: string) => (/[";\r\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
+    const csv = linhasExportacao().map((l) => l.map(campo).join(";")).join("\r\n");
+    const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `Usuarios_Castelo_Inn_${format(new Date(), "yyyy-MM-dd")}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    toast.success(`Planilha com ${usuarios.length} usuários baixada.`);
+    setShowExportar(false);
+  };
+
   const confirmDelete = async () => {
     if (!userToDelete) return;
     try {
@@ -220,6 +272,18 @@ export default function Usuarios() {
           >
             <Plus className="h-5 w-5" />
           </Button>
+          {/* No celular fica na linha da busca: na de baixo os dois seletores
+              ficariam estreitos demais e cortariam o texto. */}
+          <Button
+            variant="outline"
+            onClick={() => setShowExportar(true)}
+            disabled={loading || usuarios.length === 0}
+            title="Exportar usuários (copiar ou planilha)"
+            aria-label="Exportar usuários"
+            className={`${BOTAO_ICONE} sm:hidden`}
+          >
+            <FileSpreadsheet className="h-4 w-4" />
+          </Button>
         </div>
 
         <div className="flex gap-2">
@@ -250,8 +314,51 @@ export default function Usuarios() {
             <Plus className="mr-2 h-4 w-4" />
             Novo usuário
           </Button>
+          <Button
+            variant="outline"
+            onClick={() => setShowExportar(true)}
+            disabled={loading || usuarios.length === 0}
+            title="Exportar usuários (copiar ou planilha)"
+            aria-label="Exportar usuários"
+            className={`${BOTAO_ICONE} hidden sm:inline-flex`}
+          >
+            <FileSpreadsheet className="h-4 w-4" />
+          </Button>
         </div>
       </div>
+
+      {/* Exportar para o RH */}
+      <Dialog open={showExportar} onOpenChange={setShowExportar}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader className="pr-8">
+            <DialogTitle className="flex items-center gap-2 font-bold text-teal-900">
+              <FileSpreadsheet className="h-5 w-5 shrink-0" /> Exportar usuários
+            </DialogTitle>
+            <DialogDescription>
+              Todos os {usuarios.length} usuários ({usuarios.filter((u) => u.ativo).length} ativos), por
+              departamento: login, departamento, perfil, situação e data de cadastro.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="flex gap-2.5 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
+            <KeyRound className="h-4 w-4 shrink-0 mt-0.5" />
+            <p>
+              <strong>A senha não vai junto:</strong> por segurança o sistema não guarda as senhas,
+              só um código que não volta a ser a senha. Para entregar o acesso a alguém, edite o
+              usuário, defina uma senha nova e passe para a pessoa.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+            <Button variant="outline" onClick={copiarUsuarios} className="h-11 font-bold">
+              <Copy className="h-4 w-4 mr-2" /> Copiar
+            </Button>
+            <Button onClick={baixarPlanilhaUsuarios} className={`${BOTAO_PRIMARIO} h-11`}>
+              <Download className="h-4 w-4 mr-2" /> Baixar planilha
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent>

@@ -15,7 +15,7 @@ export function useRequisicoesSync(userId?: string) {
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const fetchReqs = useCallback(
-    async (isSilent = false) => {
+    async (isSilent = false): Promise<boolean> => {
       if (!isSilent) setLoading(true);
       else setUpdating(true);
 
@@ -23,13 +23,19 @@ export function useRequisicoesSync(userId?: string) {
         const data = await getRequisicoes(userId);
         setReqs(data || []);
         setLastUpdated(new Date());
+        return true;
       } catch (error: any) {
         console.error("Erro ao carregar requisições DADOS:", JSON.stringify(error, Object.getOwnPropertyNames(error)));
-        setReqs([]);
         if (!isSilent) {
+          // Primeira carga: não há lista para manter.
+          setReqs([]);
           const detail = error?.message || error?.details || JSON.stringify(error);
           toast.error(`Erro ao carregar requisições: ${detail}`);
         }
+        // Atualização que falhou (internet caiu na hora) mantém a lista que já
+        // estava na tela. Antes ela era trocada por uma vazia, sem aviso, e
+        // aparecia "Nenhuma requisição encontrada".
+        return false;
       } finally {
         if (!isSilent) setLoading(false);
         else setUpdating(false);
@@ -66,14 +72,29 @@ export function useRequisicoesSync(userId?: string) {
       )
       .subscribe();
 
+    // Celular: com o app em segundo plano a conexão em tempo real cai, e ao
+    // voltar a lista podia estar velha. Voltou para a tela, busca de novo.
+    const aoVoltar = () => {
+      if (document.visibilityState === "visible") agendarRefetch();
+    };
+    document.addEventListener("visibilitychange", aoVoltar);
+
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
+      document.removeEventListener("visibilitychange", aoVoltar);
       supabase.removeChannel(channel);
     };
   }, [fetchReqs, agendarRefetch, userId]);
 
-  const atualizarManualmente = () => {
-    fetchReqs(true);
+  /** Botão de atualizar: busca de novo e SEMPRE diz o resultado. */
+  const atualizarManualmente = async () => {
+    const ok = await fetchReqs(true);
+    // id fixo: tocar várias vezes não empilha avisos.
+    if (ok) {
+      toast.success(`Lista atualizada às ${new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}.`, { id: "lista-atualizada" });
+    } else {
+      toast.error("Não foi possível atualizar agora. Confira a internet e tente de novo.", { id: "lista-atualizada" });
+    }
   };
 
   return {
