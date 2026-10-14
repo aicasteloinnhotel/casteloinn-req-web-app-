@@ -1,10 +1,19 @@
-﻿import React, { useMemo, useEffect, useState, useCallback } from "react";
-import { format, parseISO, getMonth, getYear } from "date-fns";
+import React, { useMemo, useEffect, useState, useCallback } from "react";
+import {
+  addDays,
+  addWeeks,
+  differenceInCalendarDays,
+  format,
+  startOfDay,
+  startOfMonth,
+  startOfWeek,
+  subDays,
+  subMonths,
+} from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { Requisicao, ItemReposicao } from "@/types";
 import { getListaReposicao } from "@/services/reposicao";
 import { supabase } from "@/lib/supabase";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useNavigate } from "react-router-dom";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
@@ -16,15 +25,21 @@ import {
   CartesianGrid,
   Tooltip as RechartsTooltip,
   ResponsiveContainer,
-  Legend
 } from "recharts";
-import { descreverQuantidades, formatItemName } from "@/lib/utils";
-import { calcularSaidas } from "@/lib/saidas";
-import { StatusBadge } from "@/components/StatusBadge";
+import { descreverQuantidades, formatItemName, precisaLancar } from "@/lib/utils";
 import { BotaoSuspenderRequisicoes } from "@/components/PausaInventario";
 import { useBloqueio } from "@/contexts/BloqueioContext";
-import { Calendar, Users, Hourglass, ShoppingCart, BarChart3, ClipboardList, Printer, AlertTriangle, Truck, MessageSquareWarning } from "lucide-react";
-
+import {
+  Inbox,
+  Package,
+  ClipboardList,
+  ShoppingCart,
+  Printer,
+  RefreshCcw,
+  MessageSquareWarning,
+  ChevronRight,
+  PackageSearch,
+} from "lucide-react";
 
 interface GroupedItem {
   item_id: string;
@@ -44,6 +59,80 @@ interface Props {
   lastUpdated: Date;
   updating: boolean;
   onRefresh: () => void;
+}
+
+/** Há quanto tempo: "38 min", "3 h", "2 dias". */
+const tempoDesde = (iso: string, agora: number): string => {
+  const min = Math.max(0, Math.floor((agora - new Date(iso).getTime()) / 60000));
+  if (min < 60) return `${min} min`;
+  const h = Math.floor(min / 60);
+  if (h < 24) return `${h} h`;
+  const d = Math.floor(h / 24);
+  return `${d} ${d === 1 ? "dia" : "dias"}`;
+};
+
+/** Pedido esperando mais que isto fica em destaque na fila. */
+const ESPERA_LONGA_MIN = 30;
+/** Entregue e não lançada há mais que isto: atenção no TOTVS. */
+const LANCAMENTO_ATRASADO_DIAS = 7;
+/** Janela do gráfico de linha. */
+const MESES_NO_GRAFICO = 6;
+/** Com mais dias que isto de dados, o gráfico passa de diário a semanal. */
+const DIAS_ATE_AGRUPAR_POR_SEMANA = 62;
+const CARTAO ="bg-white rounded-xl border border-slate-200 shadow-sm";
+
+/** Um dos quatro números do topo. Tocar abre a lista certa já filtrada. */
+function Indicador({
+  icone,
+  titulo,
+  valor,
+  detalhe,
+  tomDetalhe = "neutro",
+  aoTocar,
+  extra,
+}: {
+  icone: React.ReactNode;
+  titulo: string;
+  valor: number;
+  detalhe: string;
+  tomDetalhe?: "neutro" | "atencao" | "perigo";
+  aoTocar: () => void;
+  extra?: React.ReactNode;
+}) {
+  const cor =
+    tomDetalhe === "perigo" ? "text-red-600" : tomDetalhe === "atencao" ? "text-amber-700" : "text-slate-500";
+  // O quadrado do ícone ocupa o vazio à esquerda e já diz o tom: verde em dia,
+  // âmbar atenção, vermelho atrasado.
+  const caixaIcone =
+    tomDetalhe === "perigo"
+      ? "bg-red-50 text-red-600"
+      : tomDetalhe === "atencao"
+        ? "bg-amber-50 text-amber-700"
+        : "bg-teal-50 text-teal-700";
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={aoTocar}
+      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); aoTocar(); } }}
+      className={`${CARTAO} p-3 flex flex-col items-start gap-2 sm:flex-row sm:items-center sm:gap-3 text-left cursor-pointer hover:border-teal-300 hover:shadow-md transition-all min-w-0 relative`}
+    >
+      {/* No celular o ícone fica em cima: lado a lado, o texto ficava com
+          três dedos de largura e quebrava em várias linhas. */}
+      <span className={`h-9 w-9 sm:h-11 sm:w-11 shrink-0 rounded-xl flex items-center justify-center ${caixaIcone} [&>svg]:h-5 [&>svg]:w-5`}>
+        {icone}
+      </span>
+      <div className="min-w-0 flex-1 w-full">
+        {/* Espaço à direita só no título do cartão que tem botão no canto
+            (Reposição); o detalhe embaixo usa a largura toda. No celular o
+            botão fica na altura do ícone e não encosta no título. */}
+        <p className={`text-xs font-semibold text-slate-600 leading-tight ${extra ? "sm:pr-8" : ""}`}>{titulo}</p>
+        <p className="text-2xl font-black text-slate-800 leading-none mt-1 tabular-nums">{valor}</p>
+        <p className={`text-xs font-semibold mt-1 leading-tight ${cor} [overflow-wrap:anywhere]`}>{detalhe}</p>
+      </div>
+      {extra}
+    </div>
+  );
 }
 
 export default function DashboardAlmoxarifado({
@@ -88,49 +177,130 @@ export default function DashboardAlmoxarifado({
     fetchListaReposicao();
   }, [lastUpdated, fetchListaReposicao]);
 
-  // --- CHART DATA ---
-  const chartData = useMemo(() => {
-    const months = [
-      "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
-      "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"
-    ];
-    const data = months.map(m => ({ name: m, reqs: 0, rupturas: 0 }));
-    const currentYear = new Date().getFullYear();
+  // Relógio de 1 minuto: o "esperando há 38 min" anda sozinho na tela.
+  const [agora, setAgora] = useState(() => Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setAgora(Date.now()), 60000);
+    return () => clearInterval(t);
+  }, []);
 
-    reqs.forEach(req => {
-      const d = parseISO(req.created_at);
-      if (getYear(d) === currentYear) {
-        const m = getMonth(d);
-        data[m].reqs += 1;
-        if (req.status === "AGUARDANDO" || req.status === "RUPTURA_PARCIAL" || req.status === "RUPTURA_TOTAL") {
-          data[m].rupturas += 1;
-        }
-      }
+  // --- OS QUATRO NÚMEROS ---
+  const pendentes = useMemo(
+    () => reqs.filter((r) => r.status === "PENDENTE")
+      .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()),
+    [reqs],
+  );
+  const separando = useMemo(() => reqs.filter((r) => r.status === "SEPARANDO"), [reqs]);
+  const aLancar = useMemo(() => reqs.filter((r) => precisaLancar(r.status) && !r.lancado), [reqs]);
+  const aLancarAtrasadas = aLancar.filter(
+    (r) => agora - new Date(r.created_at).getTime() > LANCAMENTO_ATRASADO_DIAS * 864e5,
+  ).length;
+
+  // --- LISTA DE REPOSIÇÃO (Indicadores) ---
+  const reposicao = useMemo(() => {
+    const ativos = listaReposicao.filter(item => {
+      if (item.resolvido) return false;
+      if (item.tipo_origem === "RUPTURA" && item.requisicao?.status !== "AGUARDANDO") return false;
+      return true;
     });
+    // Itens distintos, como na Lista de Reposição (o mesmo material de duas
+    // requisições é uma linha só lá).
+    const itens = new Set(ativos.map((i) => i.item_id));
+    const urgentes = new Set(ativos.filter((i) => i.urgente).map((i) => i.item_id));
+    return { itens: itens.size, urgentes: urgentes.size };
+  }, [listaReposicao]);
+  const aguardando = useMemo(
+    () => reqs.filter((r) => r.status === "AGUARDANDO")
+      .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()),
+    [reqs],
+  );
+  const aguardandoMaterial = aguardando.length;
 
-    return data;
-  }, [reqs]);
+  // --- GRÁFICO: requisições e rupturas dos últimos 6 meses ---
+  // Começa no primeiro pedido quando ele é mais recente que 6 meses (sem isso,
+  // o começo da linha ficava vazio, de antes de o app existir). Com até 2
+  // meses de dados vai por dia; com mais, por semana — 180 pontos diários
+  // virariam um serrote ilegível. Complementar não conta (não é pedido novo);
+  // cancelada também não.
+  const grafico = useMemo(() => {
+    const hoje = startOfDay(new Date(agora));
+    const limite = startOfDay(subMonths(hoje, MESES_NO_GRAFICO));
+    const primeiro = reqs.reduce(
+      (min, r) => Math.min(min, new Date(r.created_at).getTime()),
+      Number.POSITIVE_INFINITY,
+    );
+    const inicio = Number.isFinite(primeiro) && primeiro > limite.getTime()
+      ? startOfDay(new Date(primeiro))
+      : limite;
+    const diasDeDados = differenceInCalendarDays(hoje, inicio) + 1;
+    const porSemana = diasDeDados > DIAS_ATE_AGRUPAR_POR_SEMANA;
+    const inicioDoPonto = (d: Date) => (porSemana ? startOfWeek(d, { weekStartsOn: 1 }) : startOfDay(d));
 
-  // --- TOP SOLICITANTES ---
-  const topSolicitantes = useMemo(() => {
-    const counts: Record<string, { nome: string, dep: string, count: number }> = {};
-    reqs.forEach(req => {
-      if (req.status !== 'CANCELADA') {
-        const key = `${req.usuario?.nome || 'Desconhecido'}|${req.departamento}`;
-        if (!counts[key]) counts[key] = { nome: req.usuario?.nome || 'Desconhecido', dep: req.departamento, count: 0 };
-        counts[key].count += 1;
-      }
-    });
-    return Object.values(counts)
-      .sort((a, b) => b.count - a.count)
-      .slice(0, 3);
-  }, [reqs]);
+    const pontos: { chave: string; nome: string; reqs: number; rupturas: number }[] = [];
+    for (
+      let d = inicioDoPonto(inicio);
+      d <= hoje;
+      d = porSemana ? addWeeks(d, 1) : addDays(d, 1)
+    ) {
+      pontos.push({ chave: format(d, "yyyy-MM-dd"), nome: format(d, "dd/MM"), reqs: 0, rupturas: 0 });
+    }
+    if (pontos.length === 1) {
+      // Uma linha precisa de dois pontos: no primeiro dia, mostra a véspera.
+      const vespera = subDays(hoje, 1);
+      pontos.unshift({ chave: format(vespera, "yyyy-MM-dd"), nome: format(vespera, "dd/MM"), reqs: 0, rupturas: 0 });
+    }
+    const porChave = new Map(pontos.map((p) => [p.chave, p]));
+    for (const r of reqs) {
+      if (r.requisicao_origem_id || r.status === "CANCELADA") continue;
+      const quando = new Date(r.created_at);
+      if (quando < inicio) continue;
+      const ponto = porChave.get(format(inicioDoPonto(quando), "yyyy-MM-dd"));
+      if (!ponto) continue;
+      ponto.reqs += 1;
+      if (r.status === "RUPTURA_PARCIAL" || r.status === "RUPTURA_TOTAL") ponto.rupturas += 1;
+    }
+    const total = pontos.reduce((s, p) => s + p.reqs, 0);
+    const rupturas = pontos.reduce((s, p) => s + p.rupturas, 0);
+    return {
+      pontos,
+      porSemana,
+      desde: inicio.getTime() > limite.getTime() ? format(inicio, "dd/MM") : null,
+      total,
+      rupturas,
+      pct: total ? Math.round((rupturas / total) * 100) : 0,
+    };
+  }, [reqs, agora]);
 
+  // --- FILA DE ATENDIMENTO: quem espera há mais tempo primeiro ---
+  const fila = useMemo(
+    () => [...pendentes, ...[...separando].sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())],
+    [pendentes, separando],
+  );
+
+  // --- DO MÊS: quem mais pede ---
+  const inicioDoMes = startOfMonth(new Date(agora));
+  const quemMaisPede = useMemo(() => {
+    const contas: Record<string, { nome: string; dep: string; count: number }> = {};
+    for (const r of reqs) {
+      if (r.status === "CANCELADA" || r.requisicao_origem_id) continue;
+      if (new Date(r.created_at) < inicioDoMes) continue;
+      const chave = `${r.usuario?.nome || "Desconhecido"}|${r.departamento}`;
+      contas[chave] ??= { nome: r.usuario?.nome || "Desconhecido", dep: r.departamento, count: 0 };
+      contas[chave].count += 1;
+    }
+    // Só as 3 pessoas que mais pedem; o total do mês dá o tamanho de cada
+    // barra (a parte do mês que é dela).
+    const ordenado = Object.values(contas).sort((a, b) => b.count - a.count);
+    const total = ordenado.reduce((s, c) => s + c.count, 0);
+    return { top: ordenado.slice(0, 3), total };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reqs, inicioDoMes.getTime()]);
+  const nomeDoMes = format(new Date(agora), "MMMM", { locale: ptBR });
 
   const handlePrint = () => {
     // Primeiro, vamos agrupar os itens
     const groups = new Map<string, GroupedItem>();
-    
+
     for (const item of listaReposicao) {
       if (item.resolvido) continue;
       if (item.tipo_origem === "RUPTURA" && item.requisicao?.status !== "AGUARDANDO") continue;
@@ -156,20 +326,20 @@ export default function DashboardAlmoxarifado({
            group.prazo_original = item.prazo_original;
         }
       }
-      
+
       const group = groups.get(item.item_id)!;
       group.all_ids.push(item.id);
       group.total_quantidade += (item.quantidade || 1);
-      
+
       if (item.tipo_origem === "MANUAL" && !item.resolvido) {
         group.manual_items.push(item);
       }
       if (item.tipo_origem === "RUPTURA" && item.requisicao?.status === "AGUARDANDO") {
         group.rupturas.push(item);
-        group.tipo_origem = "RUPTURA"; 
+        group.tipo_origem = "RUPTURA";
       }
     }
-    
+
     const groupedItems = Array.from(groups.values()).sort((a, b) => {
       if (a.urgente && !b.urgente) return -1;
       if (!a.urgente && b.urgente) return 1;
@@ -177,14 +347,14 @@ export default function DashboardAlmoxarifado({
     });
 
     const doc = new jsPDF();
-    
+
     doc.setFont("helvetica", "bold");
     doc.setFontSize(20);
     doc.text("Castelo Inn", 105, 20, { align: "center" });
-    
+
     doc.setFontSize(14);
     doc.text("Lista de Reposição de Estoque", 105, 28, { align: "center" });
-    
+
     doc.setFont("helvetica", "normal");
     doc.setFontSize(10);
     doc.text(`Gerado em: ${format(new Date(), "dd/MM/yyyy 'às' HH:mm")}`, 105, 36, { align: "center" });
@@ -195,7 +365,7 @@ export default function DashboardAlmoxarifado({
       if (group.rupturas.length > 0) origens.push(`Reqs: ${group.rupturas.map(r => r.requisicao?.codigo_requisicao || '?').join(', ')}`);
       if (group.manual_items.length > 0) origens.push('Manual');
       const origemStr = origens.join(" | ");
-      
+
       return [
         formatItemName(group.item?.nome) || "Item Desconhecido",
         descreverQuantidades([...group.manual_items, ...group.rupturas]),
@@ -216,419 +386,330 @@ export default function DashboardAlmoxarifado({
     doc.save(`lista_reposicao_${format(new Date(), "yyyyMMdd_HHmm")}.pdf`);
   };
 
-  // --- REQ AGUARDANDO ---
-  const reqsAguardando = useMemo(() => {
-    // Only consider requisitions that actually have pending items in the reposicao list
-    // AND are still in "AGUARDANDO" status
-    const requisicoesComRuptura = new Set<string>();
-    listaReposicao.forEach(item => {
-      if (item.requisicao_id && !item.resolvido) {
-        if (item.tipo_origem === "RUPTURA" && item.requisicao?.status !== "AGUARDANDO") return;
-        requisicoesComRuptura.add(item.requisicao_id);
-      }
-    });
-    return reqs.filter(r => requisicoesComRuptura.has(r.id) && r.status === "AGUARDANDO").slice(0, 24);
-  }, [reqs, listaReposicao]);
+  const maisAntiga = pendentes[0];
 
-  // --- LISTA DE REPOSIÇÃO (Indicadores) ---
-  const listaComprasIndicadores = useMemo(() => {
-    const activeItems = listaReposicao.filter(item => {
-      if (item.resolvido) return false;
-      if (item.tipo_origem === "RUPTURA" && item.requisicao?.status !== "AGUARDANDO") return false;
-      return true;
-    });
-    
-    let totalItens = activeItems.length;
-    let urgentes = activeItems.filter(i => i.urgente).length;
-    let pedidos = activeItems.filter(i => !i.urgente && (i.prazo_original === 'PEDIDO' || i.prazo_original?.startsWith('PEDIDO') || i.prazo_original === 'AGUARDANDO')).length;
+  /** Uma linha da fila: número, setor, quem pediu, observação e a espera. */
+  const linhaDaFila = (r: Requisicao) => {
+    const espera = agora - new Date(r.created_at).getTime();
+    const separandoAgora = r.status === "SEPARANDO";
+    const demorando = !separandoAgora && espera > ESPERA_LONGA_MIN * 60000;
+    const qtdItens = r.itens?.length ?? 0;
+    return (
+      <li key={r.id}>
+        <button
+          type="button"
+          onClick={() => navigate(`/requisicoes/${r.id}`)}
+          className="w-full flex items-start gap-3 py-3 text-left hover:bg-slate-50 rounded-lg px-2 -mx-2"
+        >
+          <span className="w-14 shrink-0 text-lg font-black text-slate-800 leading-tight tabular-nums">
+            #{r.codigo_requisicao}
+          </span>
+          <span className="flex-1 min-w-0">
+            <span className="block text-sm font-bold text-slate-800 leading-tight [overflow-wrap:anywhere]">
+              {r.departamento}
+            </span>
+            <span className="block text-xs font-medium text-slate-500 mt-0.5 [overflow-wrap:anywhere]">
+              {r.usuario?.nome || "---"}
+              {qtdItens > 0 && ` · ${qtdItens} ${qtdItens === 1 ? "item" : "itens"}`}
+            </span>
+            {r.observacao?.trim() && (
+              <span className="mt-1 flex items-start gap-1 text-xs font-semibold text-amber-800" title={r.observacao.trim()}>
+                <MessageSquareWarning className="h-3.5 w-3.5 mt-px shrink-0" />
+                <span className="min-w-0 line-clamp-2 [overflow-wrap:anywhere]">{r.observacao.trim()}</span>
+              </span>
+            )}
+          </span>
+          <span
+            className={`shrink-0 text-xs font-bold px-2 py-1 rounded-md tabular-nums ${
+              separandoAgora
+                ? "bg-teal-50 text-teal-800 border border-teal-200"
+                : demorando
+                  ? "bg-amber-50 text-amber-800 border border-amber-200"
+                  : "bg-slate-100 text-slate-700"
+            }`}
+          >
+            {separandoAgora ? "separando" : tempoDesde(r.created_at, agora)}
+          </span>
+        </button>
+      </li>
+    );
+  };
 
-    return { total: totalItens, urgentes, pedidos };
-  }, [listaReposicao]);
+  /**
+   * Uma linha de "Aguardando material": diz O QUE falta (os itens da
+   * complementar), que é o que importa quando a compra chega.
+   */
+  const linhaAguardando = (r: Requisicao) => {
+    const nomes = (r.itens ?? []).map((l) => formatItemName(l.item?.nome) || "Item");
+    const resumo = nomes.length > 2 ? `${nomes.slice(0, 2).join(", ")} +${nomes.length - 2}` : nomes.join(", ");
+    return (
+      <li key={r.id}>
+        <button
+          type="button"
+          onClick={() => navigate(`/requisicoes/${r.id}`)}
+          className="w-full flex items-start gap-2.5 py-2 text-left hover:bg-slate-50 rounded-lg px-2 -mx-2"
+        >
+          <span className="w-11 shrink-0 text-sm font-black text-slate-700 tabular-nums">#{r.codigo_requisicao}</span>
+          <span className="flex-1 min-w-0">
+            <span className="block text-sm font-semibold text-slate-800 leading-tight truncate">{r.departamento}</span>
+            {resumo && (
+              <span className="block text-xs text-slate-500 truncate" title={nomes.join(", ")}>{resumo}</span>
+            )}
+          </span>
+          <span className="shrink-0 text-xs font-semibold text-slate-500 tabular-nums mt-px">
+            {tempoDesde(r.created_at, agora)}
+          </span>
+        </button>
+      </li>
+    );
+  };
 
-  // --- CURVA ABC ---
-  // Mesma conta da tela de Itens (lib/saidas): cada unidade é uma linha, e o
-  // nulo do banco não é mais tratado como "já separado".
-  const curvaABC = useMemo(() => {
-    const saidas = calcularSaidas(reqs).filter((s) => s.valor > 0);
-    const rotulo = (s: { nome: string; unidade: string }) => `${s.nome} (${s.unidade})`;
-    return {
-      maior: saidas.slice(0, 5).map((s) => ({ nome: rotulo(s), valor: s.valor })),
-      menor: saidas.slice(-5).reverse().map((s) => ({ nome: rotulo(s), valor: s.valor })),
-    };
-  }, [reqs]);
-
-  // --- REQ PENDENTES ---
-  const pendentes = useMemo(() => {
-    return reqs
-      .filter((r) => r.status === "PENDENTE" || r.status === "SEPARANDO")
-      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
-      .slice(0, 10);
-  }, [reqs]);
-  
-  const totalPendentesCount = reqs.filter((r) => r.status === "PENDENTE" || r.status === "SEPARANDO").length;
-
-  // Tela alta: o painel cabe inteiro. Tela baixa (notebook 1366×768,
-  // 1024×768): rola um pouco, em vez de espremer os cartões de baixo.
   return (
-    <div className="flex flex-col h-auto lg:h-full w-full gap-4 bg-slate-50 overflow-y-auto animate-in fade-in lg:pb-0 pb-4">
+    // No computador o painel tem a altura da tela (lg:h-full) e só a fila rola
+    // por dentro. O mínimo evita espremer os gráficos numa janela muito baixa:
+    // abaixo dele, quem rola é a página, como antes.
+    <div className="flex flex-col w-full gap-3 bg-slate-50 animate-in fade-in pb-4 lg:pb-0 lg:h-full lg:min-h-[600px]">
 
-      {/* Pausa para inventário. Ligada, quem libera é a faixa do topo. */}
-      {!bloqueio.ativo && (
-        <div className="flex shrink-0 items-center justify-end">
-          <BotaoSuspenderRequisicoes />
+      {/* CABEÇALHO: título, hora da última atualização, atualizar e pausa. */}
+      <div className="flex flex-wrap items-center justify-between gap-3 shrink-0">
+        <div className="min-w-0">
+          <h1 className="text-2xl font-bold tracking-tight text-teal-900">Painel do almoxarifado</h1>
+          <p className="text-sm text-slate-600 first-letter:uppercase">
+            {format(new Date(agora), "EEEE, dd/MM", { locale: ptBR })} · atualizado às {format(lastUpdated, "HH:mm")}
+          </p>
         </div>
-      )}
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={onRefresh}
+            disabled={updating}
+            title="Atualizar agora"
+            aria-label="Atualizar o painel"
+            className="h-11 w-11 shrink-0 rounded-lg border border-slate-200 bg-white text-slate-600 hover:text-slate-900 flex items-center justify-center shadow-sm"
+          >
+            <RefreshCcw className={`h-4 w-4 ${updating ? "animate-spin" : ""}`} />
+          </button>
+          {/* Pausa para inventário. Ligada, quem libera é a faixa do topo. */}
+          {!bloqueio.ativo && <BotaoSuspenderRequisicoes />}
+        </div>
+      </div>
 
-      {/* HEADER ROW (CHART) */}
-      <Card className="shrink-0 h-[260px] lg:h-[32%] shadow-xl shadow-slate-200/60 border-slate-200/60 border-slate-200 relative overflow-hidden p-0">
-        <div className="absolute top-0 right-0 z-10">
-          <div className="flex items-center gap-2 text-sm text-teal-900 font-bold border-b border-l border-teal-200/50 px-4 py-2 rounded-bl-xl bg-teal-50 shadow-sm backdrop-blur-sm">
-            <Calendar className="w-4 h-4 text-teal-600" />
-            {format(new Date(), "dd/MM/yyyy HH:mm")}
+      {/* OS QUATRO NÚMEROS — cada um abre a lista certa. */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 shrink-0">
+        <Indicador
+          icone={<Inbox />}
+          titulo="Pendentes agora"
+          valor={pendentes.length}
+          detalhe={maisAntiga ? `mais antiga há ${tempoDesde(maisAntiga.created_at, agora)}` : "nenhum pedido esperando"}
+          tomDetalhe={maisAntiga && agora - new Date(maisAntiga.created_at).getTime() > ESPERA_LONGA_MIN * 60000 ? "atencao" : "neutro"}
+          aoTocar={() => navigate("/requisicoes?filter=pendente")}
+        />
+        <Indicador
+          icone={<Package />}
+          titulo="Em separação"
+          valor={separando.length}
+          detalhe={
+            separando.length === 0
+              ? "ninguém separando"
+              : separando.slice(0, 2).map((r) => `#${r.codigo_requisicao} · ${r.departamento}`).join(", ") +
+                (separando.length > 2 ? "…" : "")
+          }
+          aoTocar={() => navigate("/requisicoes?filter=separando")}
+        />
+        <Indicador
+          icone={<ClipboardList />}
+          titulo="A lançar no TOTVS"
+          valor={aLancar.length}
+          detalhe={
+            aLancarAtrasadas > 0
+              ? `${aLancarAtrasadas} há mais de ${LANCAMENTO_ATRASADO_DIAS} dias`
+              : aLancar.length > 0 ? "todas em dia" : "nada a lançar"
+          }
+          tomDetalhe={aLancarAtrasadas > 0 ? "perigo" : "neutro"}
+          aoTocar={() => navigate("/requisicoes?lancamento=a_lancar")}
+        />
+        <Indicador
+          icone={<ShoppingCart />}
+          titulo="Reposição"
+          valor={reposicao.itens}
+          detalhe={
+            [
+              reposicao.urgentes > 0 ? `${reposicao.urgentes} urgentes` : "",
+              aguardandoMaterial > 0 ? `${aguardandoMaterial} req. aguardando` : "",
+            ].filter(Boolean).join(" · ") || "nada pendente"
+          }
+          tomDetalhe={reposicao.urgentes > 0 ? "perigo" : "neutro"}
+          aoTocar={() => navigate("/reposicao")}
+          extra={
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); handlePrint(); }}
+              title="Imprimir lista de reposição"
+              aria-label="Imprimir lista de reposição"
+              className="absolute top-2.5 right-2.5 h-8 w-8 rounded-lg border border-slate-200 bg-white text-slate-500 hover:text-slate-800 hover:bg-slate-50 flex items-center justify-center"
+            >
+              <Printer className="h-4 w-4" />
+            </button>
+          }
+        />
+      </div>
+
+      {/* CORPO: no computador cabe numa tela só. A fila (o que fazer agora)
+          é a coluna alta da esquerda e rola por dentro; à direita o gráfico
+          em cima e, embaixo, "aguardando material" e "quem mais pede". No
+          celular tudo empilha nesta ordem e a página rola. */}
+      <div className="grid grid-cols-1 gap-3 lg:flex-1 lg:min-h-0 lg:grid-cols-[minmax(0,10fr)_minmax(0,7fr)_minmax(0,7fr)] lg:grid-rows-[minmax(0,1.15fr)_minmax(0,1fr)]">
+
+        {/* FILA DE ATENDIMENTO: pendentes e em separação. */}
+        <section className={`${CARTAO} p-4 min-w-0 flex flex-col lg:col-start-1 lg:row-start-1 lg:row-span-2 lg:min-h-0`}>
+          <div className="flex items-start justify-between gap-3 mb-1 shrink-0">
+            <div className="min-w-0">
+              <h2 className="text-base font-bold text-slate-800">Fila de atendimento</h2>
+              <p className="text-xs font-semibold text-slate-500">
+                {pendentes.length} {pendentes.length === 1 ? "pendente" : "pendentes"} · {separando.length} em separação · mais antiga primeiro
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => navigate("/requisicoes?filter=pendente")}
+              className="shrink-0 text-xs font-bold text-teal-700 hover:underline flex items-center mt-1"
+            >
+              Ver todas <ChevronRight className="h-3.5 w-3.5" />
+            </button>
           </div>
-        </div>
-        <CardContent className="flex-1 w-full min-h-0 pt-10 px-4 pb-2 flex flex-col">
-          <div className="flex-1 w-full min-h-0">
+          {fila.length === 0 ? (
+            <div className="flex-1 flex flex-col items-center justify-center py-10 text-center">
+              <span className="h-12 w-12 rounded-full bg-teal-50 text-teal-700 flex items-center justify-center mb-2">
+                <Inbox className="h-6 w-6" />
+              </span>
+              <p className="text-sm font-semibold text-slate-700">Nenhum pedido esperando</p>
+              <p className="text-xs text-slate-500">Quando chegar requisição nova, ela aparece aqui.</p>
+            </div>
+          ) : (
+            <ul className="divide-y divide-slate-100 lg:flex-1 lg:min-h-0 lg:overflow-y-auto -mx-2 px-2">
+              {fila.map(linhaDaFila)}
+            </ul>
+          )}
+        </section>
+
+        {/* AGUARDANDO MATERIAL: cartão próprio, para não se misturar com a
+            fila — não há o que separar até a compra chegar. */}
+        <section className={`${CARTAO} p-4 min-w-0 flex flex-col lg:col-start-2 lg:row-start-2 lg:min-h-0`}>
+          <div className="flex items-start justify-between gap-3 shrink-0">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <span className="h-8 w-8 shrink-0 rounded-lg bg-sky-50 text-sky-700 flex items-center justify-center">
+                <PackageSearch className="h-4 w-4" />
+              </span>
+              <div className="min-w-0">
+                <h2 className="text-sm font-bold text-slate-800 leading-tight">
+                  Aguardando material <span className="font-medium text-slate-500">· {aguardando.length}</span>
+                </h2>
+                <p className="text-xs text-slate-500 leading-tight">esperando a compra chegar</p>
+              </div>
+            </div>
+            {aguardando.length > 0 && (
+              <button
+                type="button"
+                onClick={() => navigate("/requisicoes?filter=aguardando")}
+                className="shrink-0 text-xs font-bold text-teal-700 hover:underline flex items-center mt-1"
+              >
+                Ver <ChevronRight className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </div>
+          {aguardando.length === 0 ? (
+            <p className="text-sm text-slate-500 mt-3">Nenhuma requisição esperando material.</p>
+          ) : (
+            <ul className="mt-2 divide-y divide-slate-100 lg:flex-1 lg:min-h-0 lg:overflow-y-auto -mx-2 px-2">
+              {aguardando.map(linhaAguardando)}
+            </ul>
+          )}
+        </section>
+
+        {/* GRÁFICO: requisições e rupturas, últimos 6 meses. */}
+        <section className={`${CARTAO} p-4 min-w-0 flex flex-col lg:col-start-2 lg:col-span-2 lg:row-start-1 lg:min-h-0`}>
+          <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 shrink-0">
+            <h2 className="text-sm font-bold text-slate-800">
+              Requisições e rupturas{" "}
+              <span className="font-medium text-slate-500">
+                · últimos {MESES_NO_GRAFICO} meses, {grafico.porSemana ? "por semana" : "por dia"}
+                {grafico.desde && ` · desde ${grafico.desde}`}
+              </span>
+            </h2>
+            <div className="flex items-center gap-4 text-xs font-semibold text-slate-600">
+              <span className="flex items-center gap-1.5"><span className="h-0.5 w-3 rounded bg-teal-600" /> Requisições {grafico.total}</span>
+              <span className="flex items-center gap-1.5"><span className="h-0.5 w-3 rounded bg-red-500" /> Rupturas {grafico.rupturas} ({grafico.pct}%)</span>
+            </div>
+          </div>
+          <div className="h-[200px] lg:h-auto lg:flex-1 lg:min-h-0 mt-2">
             <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={chartData} margin={{ top: 20, right: 30, left: 0, bottom: 0 }}>
+              <LineChart data={grafico.pontos} margin={{ top: 5, right: 8, left: -20, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
-                <XAxis 
-                  dataKey="name" 
-                  axisLine={false} 
-                  tickLine={false} 
-                  tick={{ fontSize: 12, fill: '#334155', fontWeight: 500 }} 
-                  dy={10}
+                <XAxis dataKey="nome" axisLine={false} tickLine={false} minTickGap={24} tick={{ fontSize: 11, fill: "#64748b" }} />
+                <YAxis allowDecimals={false} axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: "#64748b" }} />
+                <RechartsTooltip
+                  contentStyle={{ borderRadius: 8, border: "1px solid #e2e8f0", fontSize: 12 }}
+                  labelFormatter={(rotulo) => (grafico.porSemana ? `Semana de ${rotulo}` : String(rotulo))}
+                  formatter={(v: number, nome: string) => [v, nome === "reqs" ? "Requisições" : "Rupturas"]}
                 />
-                <YAxis 
-                  axisLine={false} 
-                  tickLine={false} 
-                  tick={{ fontSize: 12, fill: '#334155', fontWeight: 500 }}
-                />
-                <RechartsTooltip 
-                  contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)', color: '#1e293b' }}
-                  itemStyle={{ color: '#1e293b', fontWeight: 500 }}
-                />
-                <Legend 
-                  verticalAlign="top" 
-                  height={36}
-                  iconType="circle"
-                  wrapperStyle={{ fontSize: '13px', fontWeight: 600, color: '#1e293b', paddingBottom: '10px' }}
-                />
-                <Line 
-                  name="Total de Requisições"
-                  type="monotone" 
-                  dataKey="reqs" 
-                  stroke="#0f766e" 
-                  strokeWidth={2.5}
-                  dot={{ r: 4, fill: '#0f766e', strokeWidth: 0 }}
-                  activeDot={{ r: 6 }}
-                />
-                <Line 
-                  name="Total de Rupturas"
-                  type="monotone" 
-                  dataKey="rupturas" 
-                  stroke="#dc2626" 
-                  strokeWidth={2.5}
-                  dot={{ r: 4, fill: '#dc2626', strokeWidth: 0 }}
-                  activeDot={{ r: 6 }}
-                />
+                {/* Sem animação: o painel abre direto pronto, e no celular lento
+                    a linha "crescendo" atrasava a leitura. */}
+                <Line type="monotone" dataKey="reqs" stroke="#0d9488" strokeWidth={2.5} dot={false} activeDot={{ r: 4 }} isAnimationActive={false} />
+                <Line type="monotone" dataKey="rupturas" stroke="#ef4444" strokeWidth={2.5} dot={false} activeDot={{ r: 4 }} isAnimationActive={false} />
               </LineChart>
             </ResponsiveContainer>
           </div>
-        </CardContent>
-      </Card>
+        </section>
 
-      {/* BOTTOM AREA - 3 COLUMNS */}
-      <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-4 min-h-0 lg:min-h-[400px]">
-        
-        {/* COLUNA 1: reposicao */}
-        <div className="lg:col-span-3 flex flex-col gap-4 min-h-0 h-full">
-          
-          {/* Card 1: Top Solicitantes */}
-          <Card 
-            className="flex-shrink-0 gap-0! cursor-pointer hover:shadow-md transition-all border-slate-200 group"
-            onClick={() => navigate("/admin/usuarios")}
-          >
-            <CardHeader className="p-3 pb-1 flex flex-row items-center justify-between">
-              <div className="flex items-center gap-2 text-slate-800">
-                <Users className="w-4 h-4" />
-                <CardTitle className="text-xs font-bold uppercase tracking-wider text-slate-800">Top 3 Solicitantes</CardTitle>
-              </div>
-              <span className="text-[10px] font-bold text-slate-600 uppercase">Qtd.</span>
-            </CardHeader>
-            <CardContent className="p-3 pt-0">
-              <div className="flex flex-col gap-1.5 mt-1">
-                {topSolicitantes.length > 0 ? topSolicitantes.map((s, idx) => (
-                  <div key={idx} className="flex items-center justify-between group-hover:bg-slate-50 p-1 rounded transition-colors">
-                    <div className="flex items-center gap-2 min-w-0">
-                      <span className="text-xs font-bold text-slate-700 w-4 text-center shrink-0">
-                        {idx + 1}
-                      </span>
-                      {/* O agrupamento é por pessoa; antes exibia só o setor, o
-                          que fazia o mesmo departamento aparecer repetido. */}
-                      {/* Uma linha só, nome completo no title. Quebrando linha,
-                          em notebook (1280×720, 1024×768) este cartão crescia e
-                          espremia o "Aguardando Reposição" até sumir o conteúdo. */}
-                      <span className="min-w-0 truncate text-sm font-semibold text-slate-700 leading-snug" title={`${s.nome} — ${s.dep}`}>
-                        {s.nome}{" "}
-                        <span className="text-xs font-normal text-slate-500">({s.dep})</span>
-                      </span>
-                    </div>
-                    <span className="text-sm font-bold text-teal-700 shrink-0">{s.count}</span>
-                  </div>
-                )) : (
-                  <div className="text-sm text-slate-700 text-center py-1">Sem dados no período</div>
-                )}
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Card 2 & 3 Merged: Aguardando Reposição e Lista de Reposição */}
-          <Card 
-            className="flex-1 flex flex-col gap-0! min-h-0 lg:min-h-[180px] cursor-pointer hover:shadow-md transition-all border-slate-200 group"
-            onClick={() => navigate("/reposicao")}
-          >
-            <CardHeader className="p-3 pb-2 border-b border-slate-100 flex flex-row items-center justify-between bg-white">
-              <div className="flex items-center gap-2 text-slate-800 min-w-0">
-                <Hourglass className="w-5 h-5 shrink-0" />
-                <CardTitle className="text-sm font-bold uppercase tracking-wider text-slate-800 truncate">Aguardando Reposição</CardTitle>
-              </div>
-              {/* Impressão movida para o cabeçalho: no celular ela roubava
-                  largura dos três indicadores, que é onde está o número. */}
-              <button
-                type="button"
-                onClick={(e) => { e.stopPropagation(); handlePrint(); }}
-                title="Imprimir lista de reposição"
-                className="shrink-0 w-8 h-8 rounded-lg border border-slate-200 bg-white flex items-center justify-center text-slate-600 hover:bg-slate-100 transition-colors"
-              >
-                <Printer className="w-4 h-4" />
-              </button>
-            </CardHeader>
-            <CardContent className="p-4 overflow-y-auto min-h-0 flex-1 flex flex-col gap-4 bg-slate-50/50">
-              
-              {/* Três colunas iguais ocupando toda a largura disponível. */}
-              <div className="grid grid-cols-3 gap-2 shrink-0">
-                <div className="bg-white border border-slate-200/80 rounded-lg flex flex-col items-center justify-center py-2.5 shadow-md shadow-slate-200/50">
-                  <span className="text-[10px] font-bold text-slate-700 uppercase text-center leading-tight">Faltantes</span>
-                  <span className="text-xl font-black text-slate-800 leading-none mt-1">{listaComprasIndicadores.total}</span>
-                </div>
-                <div className="bg-red-50 border border-red-100 rounded-lg flex flex-col items-center justify-center py-2.5 shadow-md">
-                  <span className="text-[10px] font-bold text-red-600 uppercase flex items-center gap-1 text-center leading-tight">
-                    Urgentes <AlertTriangle className="w-3 h-3 text-red-500 shrink-0" />
-                  </span>
-                  <span className="text-xl font-black text-red-700 leading-none mt-1">{listaComprasIndicadores.urgentes}</span>
-                </div>
-                <div className="bg-amber-50 border border-amber-200 rounded-lg flex flex-col items-center justify-center py-2.5 shadow-md">
-                  <span className="text-[10px] font-bold text-amber-800 uppercase flex items-center gap-1 text-center leading-tight">
-                    Pedidos <Truck className="w-3 h-3 text-amber-600 shrink-0" />
-                  </span>
-                  <span className="text-xl font-black text-amber-900 leading-none mt-1">{listaComprasIndicadores.pedidos}</span>
-                </div>
-              </div>
-
-              <div className="flex-1 mt-1">
-                <div className="text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-2.5">Requisições Afetadas ({reqsAguardando.length})</div>
-                <div className="flex flex-wrap gap-2">
-                  {reqsAguardando.length > 0 ? reqsAguardando.map(r => (
-                    <div 
-                      key={r.id} 
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        navigate(`/requisicoes/${r.id}`);
-                      }}
-                      className="bg-white border border-slate-200/80 shadow-md shadow-slate-200/50 text-slate-700 font-semibold text-xs px-2.5 py-1.5 rounded-md hover:bg-teal-50 hover:text-teal-700 hover:border-teal-200 transition-colors cursor-pointer shadow-lg shadow-slate-200/50 flex items-center"
-                    >
-                      #{r.codigo_requisicao}
-                    </div>
-                  )) : (
-                    <div className="text-sm text-slate-700 py-1 bg-white border border-slate-200/80 shadow-md shadow-slate-200/50 rounded-lg px-3 flex items-center justify-center h-10 w-full italic">Nenhuma requisição aguardando.</div>
-                  )}
-                </div>
-              </div>
-
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* COLUNA 2: curva ABC */}
-        <Card 
-          className="lg:col-span-3 flex flex-col min-h-0 cursor-pointer hover:shadow-md transition-all border-slate-200"
-          onClick={() => navigate("/admin/itens", { state: { tab: "relatorio" } })}
+        {/* QUEM MAIS PEDE: as 3 pessoas do mês. A própria barra traz o nome e
+            o número — sem legenda repetindo o gráfico. */}
+        <section
+          role="button"
+          tabIndex={0}
+          onClick={() => navigate("/admin/usuarios")}
+          onKeyDown={(e) => { if (e.key === "Enter") navigate("/admin/usuarios"); }}
+          className={`${CARTAO} p-4 min-w-0 flex flex-col lg:col-start-3 lg:row-start-2 lg:min-h-0 cursor-pointer hover:border-teal-300 transition-colors`}
         >
-          <CardHeader className="p-4 pb-2">
-            <div className="flex items-center gap-2 text-slate-800">
-              <BarChart3 className="w-5 h-5" />
-              <CardTitle className="text-sm font-bold uppercase tracking-wider text-slate-800">Curva ABC Itens</CardTitle>
-            </div>
-          </CardHeader>
-          <CardContent className="p-4 pt-0 flex flex-col flex-1 min-h-0 gap-6 overflow-y-auto">
-            
-            <div className="flex flex-col gap-3">
-              <h4 className="text-[11px] font-bold text-slate-800 uppercase tracking-wider">Top Maior Saída:</h4>
-              <div className="flex flex-col gap-2.5">
-                {curvaABC.maior.length === 0 && <span className="text-sm text-slate-700">Sem dados</span>}
-                {curvaABC.maior.map((item, idx) => {
-                  const max = Math.max(...curvaABC.maior.map(i => i.valor));
-                  const pct = Math.max(10, (item.valor / max) * 100);
-                  return (
-                    <div key={idx} className="flex flex-col lg:flex-row lg:items-center gap-1 lg:gap-3">
-                      {/* No celular o nome ocupa a linha inteira; a largura fixa
-                          de 96px cortava nomes que precisavam de 200px. */}
-                      <span className="text-xs font-semibold text-slate-800 lg:flex-1 lg:min-w-0 break-words leading-snug" title={formatItemName(item.nome)}>{formatItemName(item.nome)}</span>
-                      <div className="flex items-center gap-2 lg:contents">
-                        <div className="flex-1 lg:flex-none lg:w-20 h-2.5 bg-slate-200 rounded-full overflow-hidden shrink-0">
-                          <div className="h-full bg-teal-700 rounded-full" style={{ width: `${pct}%` }} />
-                        </div>
-                        <span className="text-xs font-bold text-slate-700 w-8 text-right shrink-0">{item.valor}</span>
-                      </div>
+          <div className="shrink-0">
+            <h2 className="text-sm font-bold text-slate-800 leading-tight">
+              Quem mais pede <span className="font-medium text-slate-500">· {nomeDoMes}</span>
+            </h2>
+            {quemMaisPede.total > 0 && (
+              <p className="text-xs text-slate-500 leading-tight tabular-nums">de {quemMaisPede.total} pedidos no mês</p>
+            )}
+          </div>
+          {quemMaisPede.top.length === 0 ? (
+            <p className="text-sm text-slate-500 mt-3">Sem pedidos neste mês ainda.</p>
+          ) : (
+            <ul className="mt-3 space-y-2 lg:flex-1 lg:flex lg:flex-col lg:justify-center">
+              {quemMaisPede.top.map((p) => {
+                const pct = Math.round((p.count / quemMaisPede.total) * 100);
+                // Comprimento em relação ao 1º lugar (a barra dele vai até o fim);
+                // a porcentagem diz quanto do mês é de cada um.
+                const largura = Math.max(8, (p.count / quemMaisPede.top[0].count) * 100);
+                return (
+                  <li
+                    key={`${p.nome}|${p.dep}`}
+                    className="relative h-11 rounded-lg bg-white border border-slate-200 overflow-hidden"
+                    title={`${p.nome} — ${p.dep}: ${p.count} pedidos (${pct}% do mês)`}
+                  >
+                    {/* Cor clara: o texto escuro fica legível por cima. */}
+                    <div className="absolute inset-y-0 left-0 bg-teal-100" style={{ width: `${largura}%` }} />
+                    <div className="relative h-full flex items-center gap-2 px-3">
+                      <span className="min-w-0 flex-1 leading-tight">
+                        <span className="block text-xs font-bold text-slate-800 truncate">{p.dep}</span>
+                        <span className="block text-[11px] font-medium text-slate-600 truncate">{p.nome}</span>
+                      </span>
+                      <span className="shrink-0 text-sm font-black text-slate-800 tabular-nums">
+                        {p.count} <span className="text-[11px] font-semibold text-slate-500">({pct}%)</span>
+                      </span>
                     </div>
-                  );
-                })}
-              </div>
-            </div>
-
-            <div className="h-[1px] w-full bg-slate-200" />
-
-            <div className="flex flex-col gap-3">
-              <h4 className="text-[11px] font-bold text-slate-800 uppercase tracking-wider">Top Menor Saída:</h4>
-              <div className="flex flex-col gap-2.5">
-                {curvaABC.menor.length === 0 && <span className="text-sm text-slate-700">Sem dados</span>}
-                {curvaABC.menor.map((item, idx) => {
-                  const max = Math.max(...curvaABC.menor.map(i => i.valor));
-                  const pct = Math.max(10, (item.valor / max) * 100);
-                  return (
-                    <div key={idx} className="flex flex-col lg:flex-row lg:items-center gap-1 lg:gap-3">
-                      {/* No celular o nome ocupa a linha inteira; a largura fixa
-                          de 96px cortava nomes que precisavam de 200px. */}
-                      <span className="text-xs font-semibold text-slate-800 lg:flex-1 lg:min-w-0 break-words leading-snug" title={formatItemName(item.nome)}>{formatItemName(item.nome)}</span>
-                      <div className="flex items-center gap-2 lg:contents">
-                        <div className="flex-1 lg:flex-none lg:w-20 h-2.5 bg-slate-200 rounded-full overflow-hidden shrink-0">
-                          <div className="h-full bg-slate-500 rounded-full" style={{ width: `${pct}%` }} />
-                        </div>
-                        <span className="text-xs font-bold text-slate-700 w-8 text-right shrink-0">{item.valor}</span>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-            
-          </CardContent>
-        </Card>
-
-        {/* COLUNA 3: req. pendentes - a unica parte acionavel, entao a mais larga */}
-        <Card 
-          className="lg:col-span-6 flex flex-col min-h-0 cursor-pointer hover:shadow-md transition-all border-slate-200"
-          onClick={() => navigate("/requisicoes")}
-        >
-          <CardHeader className="p-4 pb-2">
-            <div className="flex items-center gap-2 text-slate-800">
-              <ClipboardList className="w-5 h-5" />
-              <CardTitle className="text-sm font-bold uppercase tracking-wider text-slate-800">Req. Pendentes</CardTitle>
-            </div>
-          </CardHeader>
-          <CardContent className="p-0 flex flex-col flex-1 min-h-0">
-            {/* CELULAR: lista. Seis colunas numa tela de 375px obrigavam a
-                rolagem lateral e cortavam departamento e solicitante. */}
-            <div className="lg:hidden flex-1 overflow-y-auto px-3 pb-2 divide-y divide-slate-100">
-              {pendentes.length > 0 ? pendentes.map(req => (
-                <button
-                  key={req.id}
-                  type="button"
-                  onClick={(e) => { e.stopPropagation(); navigate(`/requisicoes/${req.id}`); }}
-                  className="w-full text-left py-3 flex items-start justify-between gap-3 hover:bg-slate-50 transition-colors"
-                >
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="font-black text-slate-800 text-sm">#{req.codigo_requisicao}</span>
-                      <StatusBadge status={req.status} />
-                    </div>
-                    <p className="text-sm font-semibold text-slate-800 mt-1 break-words">{req.departamento}</p>
-                    <p className="text-xs text-slate-600 break-words">{req.usuario?.nome || "Sistema"}</p>
-                    <p className="text-xs text-slate-500 mt-0.5">
-                      {req.itens?.length || 0} {req.itens?.length === 1 ? "item" : "itens"} • {format(parseISO(req.created_at), "dd/MM/yy HH:mm")}
-                    </p>
-                    {/* Observação à vista antes de abrir: é onde vem o aviso. */}
-                    {req.observacao?.trim() && (
-                      <p className="mt-1.5 flex items-start gap-1.5 text-xs font-semibold text-amber-950 bg-amber-50 border border-amber-300 rounded-md px-2 py-1">
-                        <MessageSquareWarning className="w-3.5 h-3.5 mt-px shrink-0 text-amber-700" />
-                        <span className="min-w-0 line-clamp-2 [overflow-wrap:anywhere]">{req.observacao.trim()}</span>
-                      </p>
-                    )}
-                  </div>
-                </button>
-              )) : (
-                <div className="text-center py-8 text-slate-700 font-medium text-sm">
-                  Nenhuma requisição pendente
-                </div>
-              )}
-            </div>
-
-            {/* COMPUTADOR: tabela */}
-            <div className="hidden lg:block overflow-auto flex-1 px-4">
-              <table className="w-full text-left text-sm border-collapse">
-                <thead className="sticky top-0 bg-white z-10">
-                  <tr className="border-b border-slate-300">
-                    <th className="py-2 font-bold text-slate-700 text-xs uppercase tracking-wider">Nº</th>
-                    <th className="py-2 font-bold text-slate-700 text-xs uppercase tracking-wider">Departamento</th>
-                    <th className="py-2 font-bold text-slate-700 text-xs uppercase tracking-wider">Solicitante</th>
-                    <th className="py-2 font-bold text-slate-700 text-xs uppercase tracking-wider text-center">Itens</th>
-                    <th className="py-2 font-bold text-slate-700 text-xs uppercase tracking-wider">Data/Hora</th>
-                    <th className="py-2 font-bold text-slate-700 text-xs uppercase tracking-wider text-right">Status</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-200">
-                  {pendentes.length > 0 ? pendentes.map(req => (
-                    <tr 
-                      key={req.id} 
-                      className="hover:bg-slate-100 transition-colors group cursor-pointer"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        navigate(`/requisicoes/${req.id}`);
-                      }}
-                    >
-                      <td className="py-2.5 font-bold text-slate-800">#{req.codigo_requisicao}</td>
-                      {/* Sem max-w fixo: a coluna agora tem 143px reais e o
-                          limite de 100px cortava nomes à toa. Deixa quebrar. */}
-                      <td className="py-2.5 pr-2 text-slate-800 font-semibold break-words">
-                        {req.departamento}
-                        {/* Observação à vista, embaixo do setor; inteira ao passar o mouse. */}
-                        {req.observacao?.trim() && (
-                          <span
-                            className="mt-1 flex items-start gap-1 text-xs font-semibold text-amber-900"
-                            title={req.observacao.trim()}
-                          >
-                            <MessageSquareWarning className="w-3.5 h-3.5 mt-px shrink-0 text-amber-700" />
-                            <span className="min-w-0 line-clamp-2 [overflow-wrap:anywhere]">{req.observacao.trim()}</span>
-                          </span>
-                        )}
-                      </td>
-                      <td className="py-2.5 pr-2 text-slate-700 font-medium break-words">{req.usuario?.nome || "Sistema"}</td>
-                      <td className="py-2.5 text-center text-slate-700 font-bold">{req.itens?.length || 0}</td>
-                      <td className="py-2.5 text-slate-600 text-xs font-medium">{format(parseISO(req.created_at), "dd/MM/yy HH:mm")}</td>
-                      <td className="py-2.5 text-right">
-                        {/* Mesma pílula da lista de requisições: antes PENDENTE
-                            era laranja aqui e amarelo lá. */}
-                        <StatusBadge status={req.status} />
-                      </td>
-                    </tr>
-                  )) : (
-                    <tr>
-                      <td colSpan={6} className="text-center py-8 text-slate-700 font-medium text-sm">
-                        Nenhuma requisição pendente
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-            <div className="border-t border-slate-200 p-3 bg-slate-50 text-xs text-slate-600 font-medium flex justify-between mt-auto">
-              <span>Total de registros: <span className="font-bold text-slate-800">{totalPendentesCount}</span></span>
-              <span className="text-teal-700 font-bold hover:underline">Ver todas</span>
-            </div>
-          </CardContent>
-        </Card>
-
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </section>
       </div>
     </div>
   );

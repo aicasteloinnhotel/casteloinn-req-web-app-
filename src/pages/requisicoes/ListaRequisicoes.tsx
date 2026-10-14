@@ -45,10 +45,16 @@ export default function ListaRequisicoes() {
   // uma requisição pendente também não está lançada, mas ainda não pode ser.
   type FiltroLancamento = "TODOS" | "A_LANCAR" | "LANCADAS";
   const ehAlmoxarifado = user?.perfil === "ALMOXARIFADO";
+  // Atalho do painel (?lancamento=a_lancar) também vale mais que o guardado.
+  const lancamentoDaUrl = (searchParams.get("lancamento") || "").toUpperCase();
   const [filtroLancamento, setFiltroLancamento] = useState<FiltroLancamento>(() =>
-    ehAlmoxarifado && (salvos.lancamento === "A_LANCAR" || salvos.lancamento === "LANCADAS")
-      ? salvos.lancamento
-      : "TODOS"
+    !ehAlmoxarifado
+      ? "TODOS"
+      : lancamentoDaUrl === "A_LANCAR" || lancamentoDaUrl === "LANCADAS"
+        ? lancamentoDaUrl
+        : salvos.lancamento === "A_LANCAR" || salvos.lancamento === "LANCADAS"
+          ? salvos.lancamento
+          : "TODOS"
   );
 
   // Advanced filters
@@ -89,7 +95,7 @@ export default function ListaRequisicoes() {
   // O atalho do painel já virou filtro guardado: tira da URL, senão um F5
   // depois de trocar o filtro voltaria para o do atalho.
   useEffect(() => {
-    if (searchParams.has("filter")) setSearchParams({}, { replace: true });
+    if (searchParams.has("filter") || searchParams.has("lancamento")) setSearchParams({}, { replace: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
