@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { useParams, useNavigate, useLocation, Navigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
-import { contemTexto, formatItemName, unidadeDoItem } from "@/lib/utils";
+import { contemTexto, descreverQuantidades, formatItemName, unidadeDoItem, UNIDADE_PADRAO } from "@/lib/utils";
 import {
   avaliarSeparacao,
   formatarQtd,
@@ -25,11 +25,28 @@ import {
   LOCK_TTL_MS
 } from "@/services/api";
 import { ObservacaoDestaque } from "@/components/ObservacaoDestaque";
-import { atualizarQuantidadeReposicao } from "@/services/reposicao";
-import { Requisicao, Item, RequisicaoItemComDetalhes } from "@/types";
+import {
+  adicionarItemReposicao,
+  atualizarQuantidadeReposicao,
+  getListaReposicao,
+} from "@/services/reposicao";
+import { Requisicao, Item, ItemReposicao, RequisicaoItemComDetalhes } from "@/types";
 import { toast } from "@/lib/toast";
 import { format } from "date-fns";
-import { ArrowLeft, CheckSquare, Square, Edit3, Save, Plus, Search, X, FileText, ShieldCheck } from "lucide-react";
+import {
+  ArrowLeft,
+  Check,
+  Edit3,
+  Save,
+  Plus,
+  Minus,
+  Search,
+  X,
+  FileText,
+  ShieldCheck,
+  ShoppingCart,
+  PackageX,
+} from "lucide-react";
 import {
   TERMO_VERSAO,
   TERMO_TITULO,
@@ -49,7 +66,6 @@ import {
 } from "@/components/ui/dialog";
 import SignatureCanvas from 'react-signature-canvas';
 
-const ITEMS_PER_PAGE = 20;
 
 export default function Separacao() {
   const { id } = useParams<{ id: string }>();
@@ -67,7 +83,6 @@ export default function Separacao() {
   const [unids, setUnids] = useState<Record<string, string>>({});
   const [isFinishing, setIsFinishing] = useState(false);
   
-  const [currentPage, setCurrentPage] = useState(1);
 
   // Add item state
   const [showAddItem, setShowAddItem] = useState(false);
@@ -91,6 +106,14 @@ export default function Separacao() {
   const [newItemQtd, setNewItemQtd] = useState<number | "">("");
   const [newItemUnidade, setNewItemUnidade] = useState("");
   const [isAddingItem, setIsAddingItem] = useState(false);
+
+  // "Está acabando": mandar o item para a lista de reposição sem sair da
+  // separação. Entra como item adicionado manualmente (o mesmo do botão
+  // "Adicionar" da Lista de Reposição).
+  const [listaReposicao, setListaReposicao] = useState<ItemReposicao[]>([]);
+  const [itemParaRepor, setItemParaRepor] = useState<RequisicaoItemComDetalhes | null>(null);
+  const [qtdRepor, setQtdRepor] = useState<number | "">(1);
+  const [salvandoRepor, setSalvandoRepor] = useState(false);
 
   useEffect(() => {
     window.scrollTo(0, 0);
@@ -169,6 +192,54 @@ export default function Separacao() {
     return () => clearInterval(intervalo);
   }, [req?.id, user?.id]);
 
+  /** O que já está pendente na lista de reposição, para marcar na tela. */
+  const carregarReposicao = async () => {
+    try {
+      const lista = await getListaReposicao();
+      setListaReposicao(lista.filter((i) => !i.resolvido));
+    } catch (e) {
+      // Só serve para o aviso "já está na lista"; a separação segue sem ele.
+      console.error("Erro ao carregar a lista de reposição:", e);
+    }
+  };
+
+  useEffect(() => {
+    if (req?.id) carregarReposicao();
+  }, [req?.id]);
+
+  // Mesma regra da Lista de Reposição: ruptura só conta enquanto a
+  // complementar dela está aguardando.
+  const reposicaoPorItem = React.useMemo(() => {
+    const mapa = new Map<string, ItemReposicao[]>();
+    for (const linha of listaReposicao) {
+      if (linha.tipo_origem === "RUPTURA" && linha.requisicao?.status !== "AGUARDANDO") continue;
+      mapa.set(linha.item_id, [...(mapa.get(linha.item_id) || []), linha]);
+    }
+    return mapa;
+  }, [listaReposicao]);
+
+  const abrirRepor = (linha: RequisicaoItemComDetalhes) => {
+    setQtdRepor(1);
+    setItemParaRepor(linha);
+  };
+
+  const handleRepor = async () => {
+    if (!itemParaRepor || !user || !(Number(qtdRepor) > 0)) return;
+    setSalvandoRepor(true);
+    try {
+      // Se já houver uma linha manual pendente do item, a quantidade é somada
+      // nela (não cria linha repetida).
+      await adicionarItemReposicao(itemParaRepor.item_id, "MANUAL", undefined, Number(qtdRepor));
+      toast.success(`${formatItemName(itemParaRepor.item?.nome) || "Item"} foi para a lista de reposição.`);
+      setItemParaRepor(null);
+      carregarReposicao();
+    } catch (e: any) {
+      toast.error(`Não foi possível pôr na lista de reposição: ${e?.message || "falha de comunicação"}`);
+    } finally {
+      setSalvandoRepor(false);
+    }
+  };
+
   const loadCatalog = async () => {
     try {
       const allItens = await getItens();
@@ -213,18 +284,7 @@ export default function Separacao() {
   const totalItems = allItems.length;
   const isAllChecked = checkedItems.size === totalItems && totalItems > 0;
   const isAllConferidos = totalItems > 0 && allItems.every(item => !!conferenciaChecks[item.id]);
-  
-  const totalPages = Math.ceil(totalItems / ITEMS_PER_PAGE) || 1;
-  const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
-  const currentItems = allItems.slice(startIndex, startIndex + ITEMS_PER_PAGE);
 
-  /** Leva à página onde está o primeiro item ainda não conferido. */
-  const irParaPrimeiroPendente = () => {
-    const indice = allItems.findIndex((item) => !checkedItems.has(item.id));
-    if (indice < 0) return;
-    const pagina = Math.floor(indice / ITEMS_PER_PAGE) + 1;
-    if (pagina !== currentPage) setCurrentPage(pagina);
-  };
 
   const handleCancelar = async () => {
     if (!req || !user) return;
@@ -508,47 +568,57 @@ export default function Separacao() {
 
   if (!req) return null;
 
+  const progresso = totalItems > 0 ? Math.round((checkedItems.size / totalItems) * 100) : 0;
+
   return (
     <div className="flex flex-col bg-white text-slate-800 rounded-xl shadow-lg shadow-slate-200/50 border border-slate-200/80 relative h-[calc(100dvh-6rem)] overflow-hidden">
-      {/* Header Compacto */}
-      <div className="flex items-center justify-between px-3 py-3 sm:py-4 bg-slate-100 border-b shrink-0 rounded-t-xl">
-        <div className="flex flex-col sm:flex-row sm:items-center gap-2">
-          <Button 
-            variant="ghost" 
-            size="icon" 
-            className="w-8 h-8 md:hidden mr-1"
+      {/* CABEÇALHO: sair, número, setor e quem pediu, adicionar item e a barra
+          de progresso. Botões com 44px: dá para acertar com o polegar. */}
+      <div className="shrink-0 border-b bg-slate-50 rounded-t-xl">
+        <div className="flex items-center gap-2 sm:gap-3 px-2 sm:px-4 pt-2.5 pb-2">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-11 w-11 shrink-0 rounded-xl"
             onClick={handleCancelar}
+            aria-label="Sair da separação"
+            title="Sair da separação (a requisição volta para pendente)"
           >
-            <ArrowLeft className="w-5 h-5 text-slate-600" />
+            <ArrowLeft className="w-5 h-5 text-slate-700" />
           </Button>
-          <div className="flex flex-col">
-            <div className="flex items-center gap-2">
-              <Button 
-                variant="ghost" 
-                size="icon" 
-                className="w-8 h-8 hidden md:flex mr-1"
-                onClick={handleCancelar}
-              >
-                <ArrowLeft className="w-5 h-5 text-slate-600" />
-              </Button>
-              <h1 className="text-base sm:text-lg font-black leading-none break-words whitespace-normal">Req #{req.codigo_requisicao}</h1>
-              {/* Mesma pílula do resto do app. A de antes era cinza-claro sobre
-                  cinza e quase não se lia. */}
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+              <h1 className="text-lg sm:text-xl font-black leading-none text-slate-900">Req #{req.codigo_requisicao}</h1>
+              {/* Mesma pílula do resto do app. */}
               <StatusBadge status={req.status} />
             </div>
-            <p className="text-[11px] sm:text-sm text-slate-700 font-medium leading-tight mt-1 break-words whitespace-normal">
-              {req.departamento} • {req.usuario?.nome}
+            <p className="text-sm text-slate-600 font-medium leading-tight mt-1 [overflow-wrap:anywhere]">
+              {req.departamento} · {req.usuario?.nome}
             </p>
           </div>
-        </div>
-        <div className="flex items-center gap-3 shrink-0">
-          <div className="text-right hidden sm:block leading-tight">
-            <p className="text-[10px] font-bold text-slate-700 uppercase">Progresso</p>
-            <p className="text-sm font-black text-teal-700">{checkedItems.size} <span className="text-slate-600 font-normal">/ {totalItems}</span></p>
-          </div>
-          <Button size="sm" onClick={() => setShowAddItem(true)} className="h-8 px-2.5 text-xs bg-slate-800 hover:bg-slate-700 text-white font-bold rounded-lg shrink-0">
-            <Plus className="w-3 h-3 mr-1" /> Item
+          <Button
+            onClick={() => setShowAddItem(true)}
+            className="h-11 px-3 sm:px-4 bg-slate-800 hover:bg-slate-700 text-white font-bold rounded-xl shrink-0"
+          >
+            <Plus className="w-4 h-4 mr-1" />
+            <span className="sm:hidden">Item</span>
+            <span className="hidden sm:inline">Adicionar item</span>
           </Button>
+        </div>
+        <div className="flex items-center gap-3 px-3 sm:px-4 pb-2.5">
+          <div
+            className="flex-1 h-2.5 rounded-full bg-slate-200 overflow-hidden"
+            role="progressbar"
+            aria-valuenow={checkedItems.size}
+            aria-valuemin={0}
+            aria-valuemax={totalItems}
+            aria-label="Itens separados"
+          >
+            <div className="h-full rounded-full bg-emerald-500 transition-all" style={{ width: `${progresso}%` }} />
+          </div>
+          <span className="shrink-0 text-sm font-black text-slate-800 tabular-nums">
+            {checkedItems.size}/{totalItems} <span className="font-medium text-slate-500">separados</span>
+          </span>
         </div>
       </div>
 
@@ -561,8 +631,11 @@ export default function Separacao() {
           antes o rodapé ficava POR CIMA da lista, e numa requisição grande o
           aviso "Faltam N itens" tampava os últimos itens, impedindo marcá-los. */}
       <div className="flex-1 min-h-0 flex flex-col overflow-y-auto overflow-x-hidden w-full">
-        <div className="w-full min-w-[320px]">
-          {currentItems.map((prod) => {
+        <div className="w-full">
+          {/* Todos os itens numa lista só, é só ir rolando. Antes eram páginas
+              de 20, com "Anterior/Próxima" e um atalho para achar o item que
+              faltava em outra página. */}
+          {allItems.map((prod) => {
             const isChecked = checkedItems.has(prod.id);
             const isEditing = editingItemId === prod.id;
             const qtSolicitada = prod.quantidade;
@@ -570,189 +643,236 @@ export default function Separacao() {
             const unPedida = unidadeDoItem(prod);
             const unSep = unidadeSeparadaDe(prod);
             const resultado = avaliarSeparacao(qtSolicitada, unPedida, qtSeparada, unSep);
+            const nomeItem = formatItemName(prod.item?.nome);
+            const naReposicao = reposicaoPorItem.get(prod.item_id);
 
             const etiqueta =
               resultado.situacao === "falta" ? (
-                <span className="text-[11px] font-bold text-orange-700 bg-orange-50 border border-orange-200 px-1.5 py-0.5 rounded whitespace-nowrap">
+                <span className="text-xs font-bold text-orange-700 bg-orange-50 border border-orange-200 px-2 py-0.5 rounded-md whitespace-nowrap">
                   Falta {formatarQtd(resultado.faltante)} {unPedida}
                 </span>
               ) : resultado.situacao === "excedente" ? (
-                <span className="text-[11px] font-bold text-teal-700 bg-teal-50 border border-teal-200 px-1.5 py-0.5 rounded whitespace-nowrap">
+                <span className="text-xs font-bold text-teal-700 bg-teal-50 border border-teal-200 px-2 py-0.5 rounded-md whitespace-nowrap">
                   A mais {formatarQtd(resultado.excedente)}
                 </span>
               ) : resultado.situacao === "outra_unidade" ? (
-                <span className="text-[11px] font-bold text-sky-800 bg-sky-50 border border-sky-200 px-1.5 py-0.5 rounded whitespace-nowrap">
+                <span className="text-xs font-bold text-sky-800 bg-sky-50 border border-sky-200 px-2 py-0.5 rounded-md whitespace-nowrap">
                   Entregue em {unSep}
                 </span>
               ) : null;
 
+            const seloReposicao = naReposicao ? (
+              <span className="inline-flex items-center gap-1 text-xs font-bold text-sky-800 bg-sky-50 border border-sky-200 px-2 py-0.5 rounded-md whitespace-nowrap">
+                <ShoppingCart className="h-3 w-3" /> Na reposição
+              </span>
+            ) : null;
+
+            // Os dois botões da linha, ao lado do nome (no celular, assim as
+            // quantidades embaixo ficam numa linha só).
+            const acoes = (
+              <div className="flex items-center gap-1.5 shrink-0">
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    abrirRepor(prod);
+                  }}
+                  title={naReposicao ? "Já está na lista de reposição — somar mais" : "Está acabando: pôr na lista de reposição"}
+                  aria-label={`Pôr ${nomeItem} na lista de reposição`}
+                  className={`h-10 w-10 rounded-xl border flex items-center justify-center transition-colors ${
+                    naReposicao
+                      ? "bg-sky-50 border-sky-200 text-sky-700 hover:bg-sky-100"
+                      : "bg-white border-slate-200 text-slate-600 hover:text-sky-700 hover:border-sky-200 hover:bg-sky-50"
+                  }`}
+                >
+                  <ShoppingCart className="h-[18px] w-[18px]" />
+                </button>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setEditingItemId(isEditing ? null : prod.id);
+                  }}
+                  title="Ajustar quantidade e unidade"
+                  aria-label={isEditing ? "Fechar ajuste" : `Ajustar quantidade de ${nomeItem}`}
+                  className={`h-10 w-10 rounded-xl border flex items-center justify-center transition-colors ${
+                    isEditing
+                      ? "bg-slate-800 border-slate-800 text-white"
+                      : "bg-white border-slate-200 text-slate-600 hover:text-teal-700 hover:border-teal-200 hover:bg-teal-50"
+                  }`}
+                >
+                  {isEditing ? <X className="h-[18px] w-[18px]" /> : <Edit3 className="h-[18px] w-[18px]" />}
+                </button>
+              </div>
+            );
+
             return (
-              <div key={prod.id} className="border-b border-slate-100 flex flex-col">
+              <div key={prod.id} className={`border-b border-slate-100 ${isChecked && !isEditing ? "bg-emerald-50/40" : "bg-white"}`}>
                 <div
-                  className={`flex items-center px-2 sm:px-4 py-1.5 sm:py-2 transition-colors cursor-pointer ${isChecked ? 'bg-slate-50/50' : 'hover:bg-slate-50'}`}
+                  className={`flex items-start gap-3 px-3 sm:px-4 py-3 cursor-pointer select-none transition-colors ${isChecked ? "" : "hover:bg-slate-50"}`}
                   onClick={() => {
                     if (!isEditing) toggleCheck(prod.id);
                   }}
                 >
-                  <div className="shrink-0 w-10 flex justify-center">
-                    {isChecked ? (
-                      <CheckSquare className="w-6 h-6 sm:w-7 sm:h-7 text-emerald-600 stroke-[2.5]" />
-                    ) : (
-                      <Square className="w-6 h-6 sm:w-7 sm:h-7 text-slate-600 stroke-[2.5]" />
-                    )}
-                  </div>
+                  {/* Caixa de marcar grande: a linha inteira também marca. */}
+                  <span
+                    aria-hidden="true"
+                    className={`h-11 w-11 shrink-0 rounded-xl border-2 flex items-center justify-center transition-colors ${
+                      isChecked ? "bg-emerald-600 border-emerald-600 text-white" : "bg-white border-slate-300 text-transparent"
+                    }`}
+                  >
+                    <Check className="h-6 w-6 stroke-[3]" />
+                  </span>
 
-                  {/* No celular o nome ocupa a linha inteira e os números vêm
-                      embaixo. */}
-                  <div className={`flex-1 min-w-0 pr-2 ${isChecked && !isEditing ? 'opacity-60' : ''}`}>
-                    <p className={`text-sm sm:text-base font-bold text-slate-800 break-words whitespace-normal leading-tight ${isChecked && !isEditing ? 'line-through' : ''}`}>
-                      {formatItemName(prod.item?.nome)}
-                    </p>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-start gap-3">
+                      <div className="flex-1 min-w-0 pt-0.5">
+                        <p
+                          className={`text-base sm:text-lg font-bold leading-snug [overflow-wrap:anywhere] ${
+                            isChecked && !isEditing ? "text-slate-500 line-through decoration-slate-400" : "text-slate-900"
+                          }`}
+                        >
+                          {nomeItem}
+                        </p>
+                        {seloReposicao && <div className="hidden sm:flex mt-1">{seloReposicao}</div>}
+                      </div>
 
-                    <div className="flex sm:hidden items-center flex-wrap gap-x-2 gap-y-0.5 mt-1">
-                      <span className="text-xs text-slate-600">
-                        Sol <span className="font-bold text-slate-700">{formatarQtd(qtSolicitada)}</span> {unPedida}
+                      {/* Computador: colunas Pedido / Separar / situação. */}
+                      <div className="hidden sm:flex items-start gap-4 shrink-0 pt-0.5">
+                        <div className="w-24 text-right">
+                          <p className="text-[11px] text-slate-500 uppercase font-bold leading-none">Pedido</p>
+                          <p className="text-lg font-semibold leading-tight text-slate-700 mt-1">
+                            {formatarQtd(qtSolicitada)} <span className="text-xs font-medium text-slate-500">{unPedida}</span>
+                          </p>
+                        </div>
+                        <div className="w-24 text-right">
+                          <p className="text-[11px] text-slate-500 uppercase font-bold leading-none">Separar</p>
+                          <p className={`text-lg font-black leading-tight mt-1 ${isChecked ? "text-slate-700" : "text-teal-700"}`}>
+                            {formatarQtd(qtSeparada)} <span className="text-xs font-medium text-slate-500">{unSep}</span>
+                          </p>
+                        </div>
+                        <div className="w-32 text-right pt-1">{etiqueta}</div>
+                      </div>
+                      {acoes}
+                    </div>
+
+                    {/* Celular: quantidades embaixo, na largura toda da linha. */}
+                    <div className="sm:hidden mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1">
+                      <span className="text-sm text-slate-600">
+                        Pedido <span className="font-bold text-slate-800">{formatarQtd(qtSolicitada)}</span> {unPedida}
                       </span>
-                      <span className="text-slate-300">•</span>
-                      <span className="text-xs text-slate-600">
-                        Sep <span className={`font-black ${isChecked ? 'text-slate-700' : 'text-teal-700'}`}>{formatarQtd(qtSeparada)}</span> {unSep}
+                      <span className="text-sm text-slate-600">
+                        Separar{" "}
+                        <span className={`text-base font-black ${isChecked ? "text-slate-700" : "text-teal-700"}`}>
+                          {formatarQtd(qtSeparada)}
+                        </span>{" "}
+                        {unSep}
                       </span>
                       {etiqueta}
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-1 sm:gap-4 shrink-0">
-                    <div className="w-20 text-right hidden sm:block">
-                      <p className="text-[10px] text-slate-600 uppercase font-bold leading-none">Sol</p>
-                      <p className="text-base font-semibold leading-tight text-slate-600">
-                        {formatarQtd(qtSolicitada)} <span className="text-xs font-medium text-slate-600 ml-0.5">{unPedida}</span>
-                      </p>
-                    </div>
-
-                    <div className="w-20 text-right hidden sm:block">
-                      <p className="text-[10px] text-slate-600 uppercase font-bold leading-none">Sep</p>
-                      <p className={`text-base font-black leading-tight ${isChecked ? 'text-slate-700' : 'text-teal-700'}`}>
-                        {formatarQtd(qtSeparada)} <span className="text-xs font-medium opacity-60 ml-0.5">{unSep}</span>
-                      </p>
-                    </div>
-
-                    <div className="w-28 text-right hidden sm:block">{etiqueta}</div>
-
-                    <div className="w-9 sm:w-10 flex justify-end">
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-7 w-7 text-slate-600 hover:text-teal-600 hover:bg-teal-50"
-                        title="Ajustar quantidade e unidade"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setEditingItemId(isEditing ? null : prod.id);
-                        }}
-                      >
-                        {isEditing ? <X className="w-4 h-4" /> : <Edit3 className="w-4 h-4" />}
-                      </Button>
+                      {seloReposicao}
                     </div>
                   </div>
                 </div>
 
                 {/* Editor da linha: quantidade E unidade entregue. */}
                 {isEditing && (
-                  <div className="bg-slate-100 border-t border-slate-200 px-4 py-2 flex items-center justify-end gap-2 sm:gap-3 flex-wrap" onClick={e => e.stopPropagation()}>
-                    <span className="text-xs font-bold text-slate-600 uppercase hidden sm:inline">Entregue:</span>
+                  <div className="bg-slate-50 border-t border-slate-200 px-3 sm:px-4 py-3" onClick={e => e.stopPropagation()}>
+                    <p className="text-xs font-bold uppercase tracking-wide text-slate-500 mb-2">Quantidade entregue</p>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <div className="flex items-center gap-1.5">
+                        <Button
+                          variant="outline"
+                          size="icon"
+                          className="h-11 w-11 shrink-0 bg-white rounded-xl"
+                          aria-label="Diminuir 1"
+                          onClick={() => {
+                            const current = qtds[prod.id] === undefined ? qtSolicitada : qtds[prod.id];
+                            setQtds({ ...qtds, [prod.id]: Math.max(0, current - 1) });
+                          }}
+                        >
+                          <Minus className="h-4 w-4" />
+                        </Button>
+                        <Input
+                          type="number"
+                          step="any"
+                          inputMode="decimal"
+                          aria-label={`Quantidade entregue de ${nomeItem}`}
+                          className="w-20 sm:w-24 h-11 text-center text-lg font-black bg-white rounded-xl"
+                          value={qtds[prod.id] === undefined ? "" : qtds[prod.id]}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            setQtds({ ...qtds, [prod.id]: val === "" ? 0 : Number(val) });
+                          }}
+                        />
+                        <Button
+                          variant="outline"
+                          size="icon"
+                          className="h-11 w-11 shrink-0 bg-white rounded-xl"
+                          aria-label="Aumentar 1"
+                          onClick={() => {
+                            const current = qtds[prod.id] === undefined ? qtSolicitada : qtds[prod.id];
+                            setQtds({ ...qtds, [prod.id]: current + 1 });
+                          }}
+                        >
+                          <Plus className="h-4 w-4" />
+                        </Button>
+                      </div>
 
-                    {/* Atalho para o caso mais comum de ajuste. */}
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="h-8 px-3 bg-white border-orange-200 text-orange-700 hover:bg-orange-50 hover:text-orange-800 font-bold shrink-0"
-                      onClick={async () => {
-                        setQtds({ ...qtds, [prod.id]: 0 });
-                        setEditingItemId(null);
-                        if (!checkedItems.has(prod.id)) {
-                          const novos = new Set(checkedItems);
-                          novos.add(prod.id);
-                          setCheckedItems(novos);
-                        }
-                        playSound('check');
-                        try {
-                          await updateRequisicaoItem(prod.id, 0, unSep);
-                        } catch (e) {
-                          console.error("Auto-save failed:", e);
-                        }
-                      }}
-                    >
-                      Em falta
-                    </Button>
-
-
-                    <div className="flex items-center gap-1">
-                      <Button
-                        variant="outline"
-                        size="icon"
-                        className="h-8 w-8 shrink-0 bg-white"
-                        onClick={() => {
-                          const current = qtds[prod.id] === undefined ? qtSolicitada : qtds[prod.id];
-                          setQtds({ ...qtds, [prod.id]: Math.max(0, current - 1) });
-                        }}
+                      {/* Pedido em UN, entregue em KG: é aqui que se troca. */}
+                      <select
+                        value={unSep}
+                        onChange={(e) => setUnids({ ...unids, [prod.id]: e.target.value })}
+                        aria-label={`Unidade entregue de ${nomeItem}`}
+                        className="h-11 w-24 shrink-0 rounded-xl border border-slate-300 bg-white px-2 text-base font-bold text-slate-700 focus:outline-none focus:ring-2 focus:ring-teal-500"
                       >
-                        -
-                      </Button>
-                      <Input
-                        type="number"
-                        step="any"
-                        inputMode="decimal"
-                        className="w-16 sm:w-20 h-8 text-center font-bold bg-white"
-                        value={qtds[prod.id] === undefined ? "" : qtds[prod.id]}
-                        onChange={(e) => {
-                          const val = e.target.value;
-                          setQtds({ ...qtds, [prod.id]: val === "" ? 0 : Number(val) });
-                        }}
-                      />
-                      <Button
-                        variant="outline"
-                        size="icon"
-                        className="h-8 w-8 shrink-0 bg-white"
-                        onClick={() => {
-                          const current = qtds[prod.id] === undefined ? qtSolicitada : qtds[prod.id];
-                          setQtds({ ...qtds, [prod.id]: current + 1 });
-                        }}
-                      >
-                        +
-                      </Button>
+                        {opcoesDeUnidade(prod.item, unPedida, unSep).map((u) => (
+                          <option key={u} value={u}>{u}</option>
+                        ))}
+                      </select>
+
+                      <div className="flex gap-2 w-full sm:w-auto sm:ml-auto">
+                        {/* Atalho para o caso mais comum de ajuste. */}
+                        <Button
+                          variant="outline"
+                          className="flex-1 sm:flex-none h-11 px-4 bg-white border-orange-200 text-orange-700 hover:bg-orange-50 hover:text-orange-800 font-bold rounded-xl"
+                          onClick={async () => {
+                            setQtds({ ...qtds, [prod.id]: 0 });
+                            setEditingItemId(null);
+                            if (!checkedItems.has(prod.id)) {
+                              const novos = new Set(checkedItems);
+                              novos.add(prod.id);
+                              setCheckedItems(novos);
+                            }
+                            playSound('check');
+                            try {
+                              await updateRequisicaoItem(prod.id, 0, unSep);
+                            } catch (e) {
+                              console.error("Auto-save failed:", e);
+                            }
+                          }}
+                        >
+                          <PackageX className="w-4 h-4 mr-1.5" /> Em falta
+                        </Button>
+                        <Button
+                          className="flex-1 sm:flex-none h-11 px-5 bg-teal-600 hover:bg-teal-700 font-bold rounded-xl"
+                          onClick={async () => {
+                            setEditingItemId(null);
+                            if (isChecked) {
+                              try {
+                                await updateRequisicaoItem(prod.id, qtds[prod.id], unSep);
+                              } catch (e) {
+                                console.error("Auto-save failed:", e);
+                              }
+                            }
+                          }}
+                        >
+                          <Save className="w-4 h-4 mr-1.5" /> Salvar
+                        </Button>
+                      </div>
                     </div>
 
-                    {/* Pedido em UN, entregue em KG: é aqui que se troca. */}
-                    <select
-                      value={unSep}
-                      onChange={(e) => setUnids({ ...unids, [prod.id]: e.target.value })}
-                      aria-label={`Unidade entregue de ${formatItemName(prod.item?.nome)}`}
-                      className="h-8 w-20 shrink-0 rounded-md border border-slate-300 bg-white px-2 text-sm font-bold text-slate-700 focus:outline-none focus:ring-2 focus:ring-teal-500"
-                    >
-                      {opcoesDeUnidade(prod.item, unPedida, unSep).map((u) => (
-                        <option key={u} value={u}>{u}</option>
-                      ))}
-                    </select>
-
-                    <Button
-                      size="sm"
-                      className="h-8 bg-teal-600 hover:bg-teal-700 font-bold px-3 sm:px-4 shrink-0"
-                      onClick={async () => {
-                        setEditingItemId(null);
-                        if (isChecked) {
-                          try {
-                            await updateRequisicaoItem(prod.id, qtds[prod.id], unSep);
-                          } catch (e) {
-                            console.error("Auto-save failed:", e);
-                          }
-                        }
-                      }}
-                    >
-                      <Save className="w-4 h-4 sm:mr-1" />
-                      <span className="hidden sm:inline">Salvar</span>
-                    </Button>
-
                     {unSep !== unPedida && (
-                      <p className="w-full text-right text-[11px] text-sky-800">
+                      <p className="mt-2 text-xs text-sky-800">
                         Pedido em {unPedida}, entregue em {unSep}: conta como atendido, e o que fica registrado é o entregue.
                       </p>
                     )}
@@ -763,45 +883,12 @@ export default function Separacao() {
           })}
         </div>
 
-        {/* Paginação */}
-        {totalPages > 1 && (
-          <div className="flex items-center justify-between px-4 py-2 bg-slate-50 border-t shrink-0">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-              disabled={currentPage === 1}
-              className="h-8 text-xs font-bold"
-            >
-              Anterior
-            </Button>
-            <span className="text-xs font-bold text-slate-700">Página {currentPage} de {totalPages}</span>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-              disabled={currentPage === totalPages}
-              className="h-8 text-xs font-bold"
-            >
-              Próxima
-            </Button>
-          </div>
-        )}
       </div>
 
       {/* Rodapé fixo EMBAIXO da lista (não por cima dela). */}
       <div className="shrink-0 w-full bg-white border-t p-3 sm:p-4 shadow-[0_-5px_15px_rgba(0,0,0,0.08)] rounded-b-xl">
-        {/* Com paginação, o item que falta conferir pode estar em outra página. */}
-        {!isAllChecked && totalItems > 0 && (
-          <button
-            type="button"
-            onClick={irParaPrimeiroPendente}
-            className="w-full mb-2 text-xs font-bold text-amber-800 bg-amber-50 border border-amber-200 rounded-lg py-1.5 px-3 hover:bg-amber-100 transition-colors flex flex-wrap items-center justify-center gap-x-1.5 text-center"
-          >
-            <span>Faltam {totalItems - checkedItems.size} de {totalItems} para conferir</span>
-            {totalPages > 1 && <span className="font-medium opacity-80">— toque para ir ao próximo</span>}
-          </button>
-        )}
+        {/* O "Faltam N de N" que ficava aqui repetia a barra de progresso do
+            topo. O atalho para o próximo item foi para junto dela. */}
         <div className="flex flex-row gap-2 sm:gap-3">
           <Button
             type="button"
@@ -811,20 +898,19 @@ export default function Separacao() {
               e.stopPropagation();
               handleCancelar();
             }}
-            className="shrink-0 h-12 sm:h-14 px-4 sm:px-6 text-sm sm:text-base font-bold rounded-xl shadow-md"
+            className="shrink-0 h-14 px-4 sm:px-6 text-base font-bold rounded-xl shadow-md"
           >
             Cancelar
           </Button>
           <Button
             onClick={prepareConference}
             disabled={!isAllChecked || isFinishing || totalItems === 0}
-            className={`flex-1 min-w-0 h-12 sm:h-14 text-sm sm:text-lg font-black rounded-xl transition-all ${isAllChecked ? 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-lg' : 'bg-slate-200 text-slate-500'}`}
+            className={`flex-1 min-w-0 h-14 text-base sm:text-lg font-black rounded-xl transition-all ${isAllChecked ? 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-lg' : 'bg-slate-200 text-slate-500'}`}
           >
             {isFinishing ? "FINALIZANDO..." : isAllChecked ? "FINALIZAR REQUISIÇÃO" : `${checkedItems.size} / ${totalItems} SEPARADOS`}
           </Button>
         </div>
       </div>
-
       {/* Dialog Conferência e Assinatura */}
       <Dialog open={showSignatureModal} onOpenChange={setShowSignatureModal}>
         <DialogContent className="p-0 overflow-hidden flex flex-col bg-slate-50 w-full h-[100dvh] max-h-[100dvh] max-w-full sm:max-w-3xl sm:h-[90vh] sm:max-h-[95vh] sm:rounded-xl sm:w-11/12 border-0">
@@ -1153,6 +1239,106 @@ export default function Separacao() {
         </DialogContent>
       </Dialog>
 
+      {/* Pôr na lista de reposição: o item está acabando no estoque. Não mexe
+          na separação — só cria (ou soma) uma linha manual na lista. */}
+      <Dialog open={!!itemParaRepor} onOpenChange={(aberto) => { if (!aberto && !salvandoRepor) setItemParaRepor(null); }}>
+        <DialogContent className="sm:max-w-md w-[92vw] p-0 overflow-hidden flex flex-col max-h-[90vh]">
+          <DialogHeader className="p-4 border-b bg-slate-50 shrink-0">
+            <DialogTitle className="flex items-center gap-2 text-teal-900 text-base sm:text-lg">
+              <ShoppingCart className="h-5 w-5 shrink-0" /> Pôr na lista de reposição
+            </DialogTitle>
+          </DialogHeader>
+          {itemParaRepor && (() => {
+            const unidadeCadastro = itemParaRepor.item?.unidade || UNIDADE_PADRAO;
+            const jaNaLista = reposicaoPorItem.get(itemParaRepor.item_id) || [];
+            const manuais = jaNaLista.filter((l) => l.tipo_origem === "MANUAL");
+            const rupturas = jaNaLista.filter((l) => l.tipo_origem === "RUPTURA");
+            return (
+              <div className="p-4 overflow-y-auto flex-1 space-y-4">
+                <p className="text-lg font-black text-slate-900 leading-snug [overflow-wrap:anywhere]">
+                  {formatItemName(itemParaRepor.item?.nome)}
+                </p>
+                {jaNaLista.length > 0 && (
+                  <div className="rounded-xl border border-sky-200 bg-sky-50 p-3 text-sm text-sky-900 space-y-0.5">
+                    <p className="font-bold">Já está na lista de reposição:</p>
+                    {manuais.length > 0 && (
+                      <p>
+                        {descreverQuantidades(manuais)} adicionado manualmente — o que você puser aqui é somado.
+                      </p>
+                    )}
+                    {rupturas.length > 0 && (
+                      <p>{descreverQuantidades(rupturas)} por ruptura de requisição.</p>
+                    )}
+                  </div>
+                )}
+                <div>
+                  <label htmlFor="qtd-repor" className="block text-xs font-bold uppercase tracking-wide text-slate-600 mb-2">
+                    Quantidade para repor
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      className="h-12 w-12 shrink-0 rounded-xl"
+                      aria-label="Diminuir 1"
+                      onClick={() => setQtdRepor((q) => Math.max(1, (Number(q) || 1) - 1))}
+                    >
+                      <Minus className="h-4 w-4" />
+                    </Button>
+                    <Input
+                      id="qtd-repor"
+                      type="number"
+                      step="any"
+                      min={0}
+                      inputMode="decimal"
+                      value={qtdRepor}
+                      onChange={(e) => setQtdRepor(e.target.value === "" ? "" : Number(e.target.value))}
+                      className="w-24 h-12 text-center text-xl font-black rounded-xl"
+                    />
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      className="h-12 w-12 shrink-0 rounded-xl"
+                      aria-label="Aumentar 1"
+                      onClick={() => setQtdRepor((q) => (Number(q) || 0) + 1)}
+                    >
+                      <Plus className="h-4 w-4" />
+                    </Button>
+                    <span className="text-base font-bold text-slate-700">{unidadeCadastro}</span>
+                  </div>
+                  {/* Linha manual vai sempre na unidade do cadastro: é nela que a
+                      Lista de Reposição soma e corrige as linhas manuais. */}
+                  {unidadeDoItem(itemParaRepor).toUpperCase() !== unidadeCadastro.toUpperCase() && (
+                    <p className="mt-2 text-xs font-semibold text-amber-800">
+                      Atenção: o pedido está em {unidadeDoItem(itemParaRepor)}, mas na lista de reposição este item é contado em {unidadeCadastro}.
+                    </p>
+                  )}
+                  <p className="mt-2 text-xs text-slate-500">
+                    Entra na Lista de Reposição como item adicionado manualmente. A separação continua igual.
+                  </p>
+                </div>
+              </div>
+            );
+          })()}
+          <div className="p-4 border-t bg-white shrink-0 flex flex-col-reverse sm:flex-row sm:justify-end gap-2">
+            <Button
+              variant="outline"
+              onClick={() => setItemParaRepor(null)}
+              disabled={salvandoRepor}
+              className="h-11 font-bold rounded-xl"
+            >
+              Cancelar
+            </Button>
+            <Button
+              onClick={handleRepor}
+              disabled={salvandoRepor || !(Number(qtdRepor) > 0)}
+              className="h-11 font-bold rounded-xl bg-teal-600 hover:bg-teal-700"
+            >
+              {salvandoRepor ? "Adicionando..." : "Pôr na lista"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

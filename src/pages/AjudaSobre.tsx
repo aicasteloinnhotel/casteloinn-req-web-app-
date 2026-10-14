@@ -391,6 +391,12 @@ export default function AjudaSobre() {
                     </li>
                     <li><strong>+ Item</strong> inclui um material que não estava no pedido.</li>
                     <li>
+                      Viu que um material está acabando? Toque no <strong>carrinho</strong> do item: ele
+                      vai para a <strong>Lista de Reposição</strong> (como item adicionado manualmente),
+                      sem sair da separação. Item que já está na lista aparece com{" "}
+                      <strong>Na reposição</strong>.
+                    </li>
+                    <li>
                       <strong>Finalizar Requisição</strong> → confira os itens com o solicitante →
                       termo e assinatura dele → assinatura do almoxarifado.
                     </li>
