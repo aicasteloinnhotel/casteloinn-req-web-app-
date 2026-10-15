@@ -9,8 +9,7 @@ export const APP = {
   nome: "Sistema de Requisições",
   versao: "1.2",
   desenvolvedor: "Nilton Junio Evangelista de Melo",
-  descricao:
-    "Substitui o pedido de material em papel: os setores fazem a requisição pelo celular, o almoxarifado separa, confere e entrega com assinatura na tela, e o que faltou vira requisição complementar e lista de compras automaticamente.",
+  descricao: "Pedido de material pelo celular, do pedido à entrega assinada.",
 };
 
 /**

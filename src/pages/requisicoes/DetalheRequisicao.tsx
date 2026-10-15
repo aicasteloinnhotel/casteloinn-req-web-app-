@@ -1709,7 +1709,6 @@ export default function DetalheRequisicao() {
                       >
                         {proximaParaLancar.nome} · {formatarQtd(proximaParaLancar.quantidade)} {proximaParaLancar.unidade}
                       </button>
-                      <span className="text-slate-500"> — toque nele na lista depois de digitar.</span>
                     </>
                   ) : (
                     <span className="font-bold text-emerald-700">Tudo digitado. Agora é só marcar como lançada.</span>

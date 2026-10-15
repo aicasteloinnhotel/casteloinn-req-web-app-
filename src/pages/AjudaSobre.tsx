@@ -28,7 +28,6 @@ import {
   Eye,
   PauseCircle,
   PackageMinus,
-  Sparkles,
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useInstallApp } from "@/hooks/useInstallApp";
@@ -605,14 +604,8 @@ export default function AjudaSobre() {
             <span className="rounded-full bg-teal-50 px-3 py-1 text-xs font-bold text-teal-800">
               Versão {APP.versao} · publicada em {format(DATA_DA_PUBLICACAO, "dd/MM/yyyy")}
             </span>
-            <p className="max-w-xl text-sm leading-relaxed text-slate-600">{APP.descricao}</p>
-            <button
-              type="button"
-              onClick={() => document.getElementById("novidades")?.scrollIntoView({ behavior: "smooth", block: "start" })}
-              className="flex items-center gap-1.5 text-sm font-bold text-teal-700 underline underline-offset-2 hover:text-teal-900"
-            >
-              <Sparkles className="h-4 w-4" /> O que mudou em cada versão
-            </button>
+            <p className="text-sm text-slate-600">{APP.descricao}</p>
+
           </section>
 
           <HistoricoDeVersoes ehAlmoxarifado={ehAlmoxarifado} />
