@@ -4,6 +4,7 @@ import { useInstallApp } from "@/hooks/useInstallApp";
 import { useAvisosEmTempoReal } from "@/hooks/useAvisosEmTempoReal";
 import { AtivarAvisos } from "@/components/AtivarAvisos";
 import { FaixaPausa } from "@/components/PausaInventario";
+import { AvisoDeNovidades } from "@/components/AvisoDeNovidades";
 import { BotaoInstalar, ConviteInstalacao } from "@/components/ConviteInstalacao";
 import { Download } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
@@ -53,6 +54,8 @@ export default function AppLayout() {
         {/* A pausa para inventário vem antes de tudo: muda o que a pessoa pode fazer. */}
         <FaixaPausa />
         {conviteVisivel ? <ConviteInstalacao className="mb-4" /> : <AtivarAvisos />}
+        {/* "Novidades da versão X", uma vez por aparelho. Fora da separação. */}
+        <AvisoDeNovidades />
       </>
     );
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);

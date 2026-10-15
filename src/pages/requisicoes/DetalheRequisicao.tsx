@@ -49,8 +49,11 @@ import {
   ShieldCheck,
   Undo2,
   Lock,
-  PackageMinus
+  PackageMinus,
+  Calculator,
+  ChevronRight
 } from "lucide-react";
+import { MiniCalculadora } from "@/components/MiniCalculadora";
 import { toast } from "@/lib/toast";
 import { supabase } from "@/lib/supabase";
 
@@ -660,6 +663,56 @@ export default function DetalheRequisicao() {
   const [confirmarCancelamento, setConfirmarCancelamento] = React.useState(false);
   // Lançamento no TOTVS: a requisição só sai do radar depois de lançada.
   const [showLancamento, setShowLancamento] = React.useState(false);
+  // A calculadora do lançamento lembra se ficou aberta: quem usa, usa em
+  // toda requisição, e não precisa abrir de novo a cada uma.
+  const [calculadoraAberta, setCalculadoraAberta] = React.useState(() => {
+    try {
+      return localStorage.getItem("calculadora_aberta") === "1";
+    } catch {
+      return false;
+    }
+  });
+  // "Onde estou no lançamento": itens já digitados no TOTVS, marcados um a um
+  // na janela. Ficam guardados por requisição neste aparelho (fechar a janela
+  // ou recarregar no meio não perde) e somem ao marcar como lançada.
+  const chaveMarcas = (id: string) => `lancamento_marcas_${id}`;
+  const [jaLancados, setJaLancados] = React.useState<Set<string>>(new Set());
+  // Cópia sempre atual das marcas, para toques seguidos não partirem de um
+  // valor velho.
+  const marcasAtuais = React.useRef<Set<string>>(new Set());
+  const linhaDoLancamento = React.useRef<Record<string, HTMLButtonElement | null>>({});
+  /** Troca as marcas na tela, na cópia atual e no armazenamento do aparelho. */
+  const aplicarMarcas = (reqId: string, marcas: Set<string>, guardar = true) => {
+    marcasAtuais.current = marcas;
+    setJaLancados(marcas);
+    if (!guardar) return;
+    try {
+      if (marcas.size === 0) localStorage.removeItem(chaveMarcas(reqId));
+      else localStorage.setItem(chaveMarcas(reqId), JSON.stringify([...marcas]));
+    } catch {
+      /* sem armazenamento: as marcas só não sobrevivem a fechar a janela */
+    }
+  };
+  React.useEffect(() => {
+    if (!id) return;
+    let salvas: string[] = [];
+    try {
+      const lido = JSON.parse(localStorage.getItem(chaveMarcas(id)) || "[]");
+      if (Array.isArray(lido)) salvas = lido;
+    } catch {
+      /* armazenamento indisponível ou corrompido: começa sem marcas */
+    }
+    aplicarMarcas(id, new Set(salvas), false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id]);
+  const alternarCalculadora = (aberta: boolean) => {
+    setCalculadoraAberta(aberta);
+    try {
+      localStorage.setItem("calculadora_aberta", aberta ? "1" : "0");
+    } catch {
+      /* sem armazenamento: só não lembra */
+    }
+  };
 
   // Recém-finalizada: só confirma que deu certo. Lançar no TOTVS e imprimir
   // ficam para depois, quando der tempo — na operação real ninguém lança na
@@ -678,6 +731,8 @@ export default function DetalheRequisicao() {
       await marcarRequisicaoLancada(req.id, user.id);
       playSound('notification');
       toast.success(`REQ #${req.codigo_requisicao} marcada como lançada no TOTVS.`);
+      // Lançada: as marcas de "onde estou" já não servem.
+      aplicarMarcas(req.id, new Set());
       setShowLancamento(false);
       await carregarDetalhes(req.id);
       // Lançou: agora sim, oferece imprimir o comprovante.
@@ -862,8 +917,28 @@ export default function DetalheRequisicao() {
     };
   });
   // Item que não saiu (entregue 0) não se lança: ele foi para a complementar.
-  // Antes aparecia "PAPEL TOALHA — 0" na lista e no "Copiar lista".
+  // Antes aparecia "PAPEL TOALHA — 0" na lista de lançamento.
   const linhasParaLancamento = todasAsLinhas.filter((l) => Number(l.quantidade) > 0);
+  // Marcas de "já digitei no TOTVS" (só das linhas que ainda existem).
+  const marcadosNoTotvs = linhasParaLancamento.filter((l) => jaLancados.has(l.id)).length;
+  const proximaParaLancar = linhasParaLancamento.find((l) => !jaLancados.has(l.id));
+  const marcarLinhaLancada = (linhaId: string) => {
+    // Parte do valor mais recente (dois toques seguidos não se perdem).
+    const novas = new Set(marcasAtuais.current);
+    const marcou = !novas.has(linhaId);
+    if (marcou) novas.add(linhaId);
+    else novas.delete(linhaId);
+    aplicarMarcas(req.id, novas);
+    if (!marcou) return;
+    // Leva o foco e a rolagem para a próxima a lançar: na volta do ALT+TAB ela
+    // está à vista, e Espaço ou Enter já marca a seguinte.
+    const proxima = linhasParaLancamento.find((l) => !novas.has(l.id));
+    if (proxima) {
+      const botao = linhaDoLancamento.current[proxima.id];
+      botao?.focus({ preventScroll: true });
+      botao?.scrollIntoView({ block: "nearest" });
+    }
+  };
   const foraDoLancamento = todasAsLinhas.filter((l) => Number(l.quantidade) <= 0);
   // Entregue e devolvido por inteiro: também fica de fora, mas não é falta.
   const linhasDevolvidasInteiras = foraDoLancamento.filter((l) => l.entregou).length;
@@ -1560,7 +1635,22 @@ export default function DetalheRequisicao() {
           da tela atrapalhando a conferência. */}
       {podeLancar && (
       <Dialog open={showLancamento} onOpenChange={setShowLancamento}>
-        <DialogContent className="sm:max-w-lg w-[94vw] max-h-[88vh] p-0 flex flex-col overflow-hidden">
+        {/* Com a calculadora aberta (só no computador), a janela alarga e ela
+            fica colada à esquerda: dentro da janela, para o teclado funcionar
+            nela, e sem sair do ALT+TAB entre o TOTVS e o app. */}
+        <DialogContent
+          className={`w-[94vw] max-h-[88vh] p-0 flex overflow-hidden ${
+            calculadoraAberta ? "sm:max-w-lg lg:max-w-[50rem]" : "sm:max-w-lg"
+          }`}
+        >
+          {/* À esquerda: o X do canto direito é o da janela inteira, e ficava
+              em cima da calculadora. */}
+          {calculadoraAberta && (
+            <div className="hidden lg:flex">
+              <MiniCalculadora />
+            </div>
+          )}
+          <div className="flex min-w-0 flex-1 flex-col">
           <DialogHeader className="p-4 border-b bg-slate-50 shrink-0">
             <DialogTitle className="text-teal-900 flex items-center gap-2">
               <ClipboardList className="h-5 w-5 shrink-0" />
@@ -1595,21 +1685,91 @@ export default function DetalheRequisicao() {
               </div>
             </div>
 
+            {/* "Onde estou": toque em cada item depois de digitá-lo no TOTVS.
+                Só enquanto não foi marcada como lançada. */}
+            {!req.lancado && linhasParaLancamento.length > 0 && (
+              <div className="flex items-center gap-3">
+                <div
+                  className="flex-1 h-2 rounded-full bg-slate-200 overflow-hidden"
+                  role="progressbar"
+                  aria-valuenow={marcadosNoTotvs}
+                  aria-valuemin={0}
+                  aria-valuemax={linhasParaLancamento.length}
+                  aria-label="Itens já digitados no TOTVS"
+                >
+                  <div
+                    className="h-full rounded-full bg-emerald-500 transition-all"
+                    style={{ width: `${(marcadosNoTotvs / linhasParaLancamento.length) * 100}%` }}
+                  />
+                </div>
+                <span className="shrink-0 text-xs font-bold text-slate-700 tabular-nums">
+                  {marcadosNoTotvs} de {linhasParaLancamento.length} no TOTVS
+                </span>
+                {marcadosNoTotvs > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      aplicarMarcas(req.id, new Set());
+                    }}
+                    className="shrink-0 text-xs font-bold text-slate-500 hover:text-slate-800 underline underline-offset-2"
+                  >
+                    desmarcar
+                  </button>
+                )}
+              </div>
+            )}
+
             {/* Colunas na mesma ordem e com os mesmos rótulos da aba Detalhe. */}
             <div className="border border-slate-200 rounded-lg overflow-hidden">
-              <div className="grid grid-cols-[1fr_3rem_4rem] gap-2 bg-slate-100 px-3 py-2 text-[10px] font-bold text-slate-600 uppercase tracking-wider">
+              <div className="grid grid-cols-[1.5rem_1fr_3rem_4rem] gap-2 bg-slate-100 px-3 py-2 text-[10px] font-bold text-slate-600 uppercase tracking-wider">
+                <span aria-hidden="true" />
                 <span>Descrição do Item</span>
                 <span className="text-center">Unid.</span>
                 <span className="text-right">Qtde.</span>
               </div>
               <div className="divide-y divide-slate-100">
-                {linhasParaLancamento.map((linha) => (
-                  <div key={linha.id} className="grid grid-cols-[1fr_3rem_4rem] gap-2 px-3 py-2.5 items-center">
-                    <span className="text-sm font-semibold text-slate-800 break-words min-w-0 uppercase">{linha.nome}</span>
-                    <span className="text-xs font-bold text-slate-600 text-center">{linha.unidade}</span>
-                    <span className="text-base font-black text-teal-800 text-right tabular-nums">{formatarQtd(linha.quantidade)}</span>
-                  </div>
-                ))}
+                {linhasParaLancamento.map((linha) => {
+                  const feita = !req.lancado && jaLancados.has(linha.id);
+                  const proxima = !req.lancado && proximaParaLancar?.id === linha.id;
+                  return (
+                    <button
+                      key={linha.id}
+                      type="button"
+                      ref={(el) => { linhaDoLancamento.current[linha.id] = el; }}
+                      disabled={!!req.lancado}
+                      onClick={() => marcarLinhaLancada(linha.id)}
+                      aria-pressed={feita}
+                      title={req.lancado ? undefined : feita ? "Desmarcar" : "Marcar como já digitado no TOTVS"}
+                      className={`w-full text-left grid grid-cols-[1.5rem_1fr_3rem_4rem] gap-2 px-3 py-2.5 items-center transition-colors outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-teal-500 disabled:cursor-default ${
+                        feita
+                          ? "bg-emerald-50/70 hover:bg-emerald-50"
+                          : proxima
+                            ? "bg-amber-50 shadow-[inset_4px_0_0_#f59e0b] hover:bg-amber-100/70"
+                            : "hover:bg-slate-50"
+                      }`}
+                    >
+                      <span
+                        aria-hidden="true"
+                        className={`h-5 w-5 rounded-md border-2 flex items-center justify-center ${
+                          feita
+                            ? "bg-emerald-600 border-emerald-600 text-white"
+                            : proxima
+                              ? "border-amber-500 text-amber-600"
+                              : req.lancado ? "border-transparent" : "border-slate-300 text-transparent"
+                        }`}
+                      >
+                        {feita ? <Check className="h-3.5 w-3.5 stroke-[3]" /> : proxima ? <ChevronRight className="h-3.5 w-3.5 stroke-[3]" /> : null}
+                      </span>
+                      <span className={`text-sm font-semibold break-words min-w-0 uppercase ${feita ? "text-slate-400 line-through" : "text-slate-800"}`}>
+                        {linha.nome}
+                      </span>
+                      <span className={`text-xs font-bold text-center ${feita ? "text-slate-400" : "text-slate-600"}`}>{linha.unidade}</span>
+                      <span className={`text-base font-black text-right tabular-nums ${feita ? "text-slate-400" : "text-teal-800"}`}>
+                        {formatarQtd(linha.quantidade)}
+                      </span>
+                    </button>
+                  );
+                })}
                 {linhasParaLancamento.length === 0 && (
                   <p className="px-3 py-4 text-sm text-center text-slate-500">Nenhum item nesta requisição.</p>
                 )}
@@ -1639,29 +1799,6 @@ export default function DetalheRequisicao() {
               )}
             </p>
 
-            <Button
-              variant="outline"
-              className="w-full h-10 font-bold text-slate-700"
-              onClick={async () => {
-                const texto = [
-                  `Destino: ${req.departamento}`,
-                  `Nº da Requisição: ${req.codigo_requisicao ?? ""}`,
-                  `Data: ${format(new Date(req.created_at), "dd/MM/yyyy")}`,
-                  "",
-                  // Vírgula decimal (6,2), como o TOTVS espera.
-                  ...linhasParaLancamento.map((l) => `${l.nome}\t${l.unidade}\t${formatarQtd(l.quantidade)}`),
-                ].join("\n");
-                try {
-                  await navigator.clipboard.writeText(texto);
-                  toast.success("Lista copiada.");
-                } catch {
-                  toast.error("O navegador não liberou a cópia. Selecione e copie na mão.");
-                }
-              }}
-            >
-              Copiar lista
-            </Button>
-
             {req.lancado && req.lancado_em && (
               <p className="text-xs text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-lg p-3 font-medium">
                 Lançada em {format(new Date(req.lancado_em), "dd/MM/yyyy 'às' HH:mm")}
@@ -1671,6 +1808,19 @@ export default function DetalheRequisicao() {
           </div>
 
           <div className="p-4 border-t bg-white shrink-0 flex flex-col-reverse sm:flex-row sm:justify-end gap-2">
+            {/* Só no computador: no celular o lançamento quase não é feito. */}
+            <Button
+              variant="outline"
+              onClick={() => alternarCalculadora(!calculadoraAberta)}
+              aria-pressed={calculadoraAberta}
+              title={calculadoraAberta ? "Fechar a calculadora" : "Abrir a calculadora ao lado"}
+              className={`hidden lg:inline-flex font-bold h-11 sm:mr-auto ${
+                calculadoraAberta ? "border-teal-300 bg-teal-50 text-teal-800 hover:bg-teal-100" : ""
+              }`}
+            >
+              <Calculator className="h-4 w-4 mr-2" />
+              Calculadora
+            </Button>
             <Button variant="outline" onClick={() => setShowLancamento(false)} className="font-bold h-11">
               Fechar
             </Button>
@@ -1688,12 +1838,18 @@ export default function DetalheRequisicao() {
               <Button
                 onClick={handleMarcarLancada}
                 disabled={updating}
-                className="font-bold h-11 bg-emerald-600 hover:bg-emerald-700 text-white"
+                className={`font-bold h-11 bg-emerald-600 hover:bg-emerald-700 text-white ${
+                  // Todos os itens marcados: o próximo passo é este botão.
+                  linhasParaLancamento.length > 0 && marcadosNoTotvs === linhasParaLancamento.length
+                    ? "ring-4 ring-emerald-200"
+                    : ""
+                }`}
               >
                 <ClipboardCheck className="h-4 w-4 mr-2" />
                 {updating ? "Marcando..." : "Marcar como lançada"}
               </Button>
             )}
+          </div>
           </div>
         </DialogContent>
       </Dialog>

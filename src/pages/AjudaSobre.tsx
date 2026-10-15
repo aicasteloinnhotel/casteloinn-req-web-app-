@@ -1,5 +1,5 @@
-import React, { useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import React, { useEffect, useState } from "react";
+import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { format } from "date-fns";
 import {
   ArrowLeft,
@@ -28,11 +28,13 @@ import {
   Eye,
   PauseCircle,
   PackageMinus,
+  Sparkles,
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useInstallApp } from "@/hooks/useInstallApp";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/StatusBadge";
+import { HistoricoDeVersoes } from "@/components/HistoricoDeVersoes";
 import { toast } from "@/lib/toast";
 import { estadoDosAvisos, pedirPermissaoDeAvisos, type EstadoAviso } from "@/lib/notificacoes";
 import { ABA, ABA_ATIVA, ABA_INATIVA, ABAS, SUBTITULO, TITULO } from "@/lib/estilos";
@@ -162,6 +164,16 @@ export default function AjudaSobre() {
   const trocarAba = (nova: Aba) => setParams(nova === "sobre" ? { aba: "sobre" } : {}, { replace: true });
 
   const ehAlmoxarifado = user?.perfil === "ALMOXARIFADO";
+  const location = useLocation();
+
+  // Chegou pelo aviso de versão nova (#novidades): abre já em "O que mudou"
+  // (rolagem instantânea; a suave às vezes não anda com a tela em segundo plano).
+  useEffect(() => {
+    if (aba !== "sobre" || location.hash !== "#novidades") return;
+    const t = setTimeout(() => document.getElementById("novidades")?.scrollIntoView({ block: "start" }), 150);
+    return () => clearTimeout(t);
+  }, [aba, location.hash]);
+
   const { instalado, podeInstalar, precisaInstrucaoIOS, promptInstall } = useInstallApp();
   const [avisos, setAvisos] = useState<EstadoAviso>(() => estadoDosAvisos());
 
@@ -437,7 +449,16 @@ export default function AjudaSobre() {
                       na ordem da Requisição Manual do TOTVS: Destino, Nº, Data, Descrição, Unid. e
                       Qtde.
                     </li>
-                    <li><strong>Copiar lista</strong> copia os itens para colar onde precisar.</li>
+                    <li>
+                      Lista grande? Toque em cada item <strong>depois de digitá-lo no TOTVS</strong>: ele
+                      fica riscado e o próximo fica destacado em amarelo, para você não se perder no
+                      ALT+TAB. As marcas ficam guardadas até marcar como lançada.
+                    </li>
+                    <li>
+                      No computador, o botão <strong>Calculadora</strong> abre uma calculadora ao lado
+                      da janela: dá para fazer a conta pelo teclado (Enter dá o resultado, Esc zera) e{" "}
+                      <strong>Copiar resultado</strong> para colar no TOTVS, sem abrir a do Windows.
+                    </li>
                     <li>Depois de lançar lá, toque em <strong>Marcar como lançada</strong>.</li>
                     <li>
                       Só então o app libera o <strong>Imprimir</strong>. O comprovante sai com o nome
@@ -585,7 +606,16 @@ export default function AjudaSobre() {
               Versão {APP.versao} · publicada em {format(DATA_DA_PUBLICACAO, "dd/MM/yyyy")}
             </span>
             <p className="max-w-xl text-sm leading-relaxed text-slate-600">{APP.descricao}</p>
+            <button
+              type="button"
+              onClick={() => document.getElementById("novidades")?.scrollIntoView({ behavior: "smooth", block: "start" })}
+              className="flex items-center gap-1.5 text-sm font-bold text-teal-700 underline underline-offset-2 hover:text-teal-900"
+            >
+              <Sparkles className="h-4 w-4" /> O que mudou em cada versão
+            </button>
           </section>
+
+          <HistoricoDeVersoes ehAlmoxarifado={ehAlmoxarifado} />
 
           <Cartao icone={<Info />} titulo="O aplicativo">
             <dl className="divide-y divide-slate-100">
