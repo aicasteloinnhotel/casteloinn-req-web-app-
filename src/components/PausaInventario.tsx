@@ -72,7 +72,14 @@ export function FaixaPausa() {
  * Botão do almoxarifado para suspender a criação de requisições durante o
  * inventário. Com a pausa ligada ele some: quem libera é a faixa do topo.
  */
-export function BotaoSuspenderRequisicoes({ className = "" }: { className?: string }) {
+export function BotaoSuspenderRequisicoes({
+  className = "",
+  curto = false,
+}: {
+  className?: string;
+  /** Só "Pausar" (para caber dentro de um cartão); a dica diz o resto. */
+  curto?: boolean;
+}) {
   const { bloqueio, suspender } = useBloqueio();
   const [aberto, setAberto] = useState(false);
   const [motivo, setMotivo] = useState("Inventário em andamento");
@@ -101,7 +108,7 @@ export function BotaoSuspenderRequisicoes({ className = "" }: { className?: stri
         title="Suspender novas requisições (inventário)"
         className={`h-9 border-amber-300 bg-white px-3 text-xs font-bold text-amber-900 hover:bg-amber-50 ${className}`}
       >
-        <PauseCircle className="mr-1.5 h-4 w-4" /> Pausar requisições
+        <PauseCircle className="mr-1.5 h-4 w-4" /> {curto ? "Pausar" : "Pausar requisições"}
       </Button>
 
       <Dialog open={aberto} onOpenChange={setAberto}>

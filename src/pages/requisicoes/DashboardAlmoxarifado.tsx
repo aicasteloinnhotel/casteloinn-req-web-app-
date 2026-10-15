@@ -26,12 +26,13 @@ import {
   Tooltip as RechartsTooltip,
   ResponsiveContainer,
 } from "recharts";
-import { descreverQuantidades, formatItemName, precisaLancar } from "@/lib/utils";
+import { descreverQuantidades, foiEntregue, formatItemName, precisaLancar } from "@/lib/utils";
 import { BotaoSuspenderRequisicoes } from "@/components/PausaInventario";
 import { useBloqueio } from "@/contexts/BloqueioContext";
+import { useAuth } from "@/contexts/AuthContext";
 import {
   Inbox,
-  Package,
+  PackageCheck,
   ClipboardList,
   ShoppingCart,
   Printer,
@@ -71,6 +72,27 @@ const tempoDesde = (iso: string, agora: number): string => {
   return `${d} ${d === 1 ? "dia" : "dias"}`;
 };
 
+/** "Bom dia" até 11h59, "Boa tarde" até 17h59, depois "Boa noite". */
+const saudacao = (quando: Date): string => {
+  const h = quando.getHours();
+  if (h >= 5 && h < 12) return "Bom dia";
+  if (h >= 12 && h < 18) return "Boa tarde";
+  return "Boa noite";
+};
+
+/**
+ * Só o primeiro nome, com a primeira letra maiúscula ("MARIA JOSÉ" → "Maria").
+ * Login que é cargo abreviado ("Enc. Almoxarifado") fica inteiro: "Enc."
+ * sozinho não diz nada.
+ */
+const primeiroNome = (nome?: string | null): string => {
+  const limpo = (nome || "").trim().replace(/\s+/g, " ");
+  const primeiro = limpo.split(" ")[0] || "";
+  if (!primeiro) return "";
+  if (primeiro.endsWith(".")) return limpo;
+  return primeiro.charAt(0).toUpperCase() + primeiro.slice(1).toLowerCase();
+};
+
 /** Pedido esperando mais que isto fica em destaque na fila. */
 const ESPERA_LONGA_MIN = 30;
 /** Entregue e não lançada há mais que isto: atenção no TOTVS. */
@@ -81,7 +103,7 @@ const MESES_NO_GRAFICO = 6;
 const DIAS_ATE_AGRUPAR_POR_SEMANA = 62;
 const CARTAO ="bg-white rounded-xl border border-slate-200 shadow-sm";
 
-/** Um dos quatro números do topo. Tocar abre a lista certa já filtrada. */
+/** Um dos números do topo. Tocar abre a lista certa já filtrada. */
 function Indicador({
   icone,
   titulo,
@@ -143,6 +165,7 @@ export default function DashboardAlmoxarifado({
 }: Props) {
   const navigate = useNavigate();
   const { bloqueio } = useBloqueio();
+  const { user } = useAuth();
 
   const [listaReposicao, setListaReposicao] = useState<ItemReposicao[]>([]);
 
@@ -192,6 +215,25 @@ export default function DashboardAlmoxarifado({
   );
   const separando = useMemo(() => reqs.filter((r) => r.status === "SEPARANDO"), [reqs]);
   const aLancar = useMemo(() => reqs.filter((r) => precisaLancar(r.status) && !r.lancado), [reqs]);
+
+  // --- ENTREGUES HOJE ---
+  // A requisição não guarda a hora da entrega, mas o aceite do termo é
+  // gravado na entrega (é obrigatório para finalizar): em produção bate com o
+  // evento de finalização do histórico em todas as encerradas. Conta toda
+  // entrega, inclusive complementar e balcão.
+  const entregas = useMemo(() => {
+    const hoje = startOfDay(new Date(agora)).getTime();
+    const ontem = hoje - 864e5;
+    let deHoje = 0;
+    let deOntem = 0;
+    for (const r of reqs) {
+      if (!foiEntregue(r.status) || !r.termo_aceito_em) continue;
+      const t = new Date(r.termo_aceito_em).getTime();
+      if (t >= hoje) deHoje += 1;
+      else if (t >= ontem) deOntem += 1;
+    }
+    return { hoje: deHoje, ontem: deOntem };
+  }, [reqs, agora]);
   const aLancarAtrasadas = aLancar.filter(
     (r) => agora - new Date(r.created_at).getTime() > LANCAMENTO_ATRASADO_DIAS * 864e5,
   ).length;
@@ -386,7 +428,6 @@ export default function DashboardAlmoxarifado({
     doc.save(`lista_reposicao_${format(new Date(), "yyyyMMdd_HHmm")}.pdf`);
   };
 
-  const maisAntiga = pendentes[0];
 
   /** Uma linha da fila: número, setor, quem pediu, observação e a espera. */
   const linhaDaFila = (r: Requisicao) => {
@@ -470,51 +511,57 @@ export default function DashboardAlmoxarifado({
     // abaixo dele, quem rola é a página, como antes.
     <div className="flex flex-col w-full gap-3 bg-slate-50 animate-in fade-in pb-4 lg:pb-0 lg:h-full lg:min-h-[600px]">
 
-      {/* CABEÇALHO: título, hora da última atualização, atualizar e pausa. */}
-      <div className="flex flex-wrap items-center justify-between gap-3 shrink-0">
-        <div className="min-w-0">
-          <h1 className="text-2xl font-bold tracking-tight text-teal-900">Painel do almoxarifado</h1>
-          <p className="text-sm text-slate-600 first-letter:uppercase">
-            {format(new Date(agora), "EEEE, dd/MM", { locale: ptBR })} · atualizado às {format(lastUpdated, "HH:mm")}
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={onRefresh}
-            disabled={updating}
-            title="Atualizar agora"
-            aria-label="Atualizar o painel"
-            className="h-11 w-11 shrink-0 rounded-lg border border-slate-200 bg-white text-slate-600 hover:text-slate-900 flex items-center justify-center shadow-sm"
-          >
-            <RefreshCcw className={`h-4 w-4 ${updating ? "animate-spin" : ""}`} />
-          </button>
-          {/* Pausa para inventário. Ligada, quem libera é a faixa do topo. */}
-          {!bloqueio.ativo && <BotaoSuspenderRequisicoes />}
-        </div>
-      </div>
-
-      {/* OS QUATRO NÚMEROS — cada um abre a lista certa. */}
+      {/* OS NÚMEROS DO TOPO. O primeiro cartão é o próprio cabeçalho (título,
+          data, atualizar e pausar): a linha de título separada ocupava espaço
+          só para isso. Escuro, na cor do menu, para não parecer um número.
+          "Pendentes agora" e "Em separação" saíram (a fila já mostra os
+          dois); tempo de atendimento também não entra: muitos setores pedem
+          para entregar mais tarde, então o tempo não mede o almoxarifado. */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 shrink-0">
+        <div className="rounded-xl bg-teal-900 text-white shadow-sm p-3 flex flex-col justify-between gap-2 min-w-0">
+          {/* Saudação no lugar de "Painel": o menu já diz onde a pessoa está.
+              O nome tem a largura toda e só quebra entre palavras. */}
+          <div className="min-w-0">
+            <p className="text-xs font-semibold text-teal-100/90 leading-tight">{saudacao(new Date(agora))},</p>
+            <h1
+              className="text-base sm:text-lg font-black leading-tight tracking-tight break-words"
+              title={user?.nome || undefined}
+            >
+              {primeiroNome(user?.nome) || "Equipe"}
+            </h1>
+            <p className="text-xs text-teal-100/90 leading-tight mt-1 first-letter:uppercase tabular-nums">
+              {format(new Date(agora), "EEE, dd/MM", { locale: ptBR })} · atualizado às {format(lastUpdated, "HH:mm")}
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            {/* Pausa para inventário. Ligada, quem libera é a faixa do topo;
+                aqui só fica o aviso. */}
+            {bloqueio.ativo ? (
+              <span className="flex-1 min-w-0 text-xs font-bold text-amber-200 leading-tight">Requisições pausadas</span>
+            ) : (
+              <BotaoSuspenderRequisicoes
+                curto
+                className="h-8 flex-1 min-w-0 border-0 bg-white text-amber-900 hover:bg-amber-50"
+              />
+            )}
+            <button
+              type="button"
+              onClick={onRefresh}
+              disabled={updating}
+              title="Atualizar agora"
+              aria-label="Atualizar o painel"
+              className="h-8 w-8 shrink-0 rounded-lg bg-white/10 hover:bg-white/20 text-white flex items-center justify-center transition-colors"
+            >
+              <RefreshCcw className={`h-4 w-4 ${updating ? "animate-spin" : ""}`} />
+            </button>
+          </div>
+        </div>
         <Indicador
-          icone={<Inbox />}
-          titulo="Pendentes agora"
-          valor={pendentes.length}
-          detalhe={maisAntiga ? `mais antiga há ${tempoDesde(maisAntiga.created_at, agora)}` : "nenhum pedido esperando"}
-          tomDetalhe={maisAntiga && agora - new Date(maisAntiga.created_at).getTime() > ESPERA_LONGA_MIN * 60000 ? "atencao" : "neutro"}
-          aoTocar={() => navigate("/requisicoes?filter=pendente")}
-        />
-        <Indicador
-          icone={<Package />}
-          titulo="Em separação"
-          valor={separando.length}
-          detalhe={
-            separando.length === 0
-              ? "ninguém separando"
-              : separando.slice(0, 2).map((r) => `#${r.codigo_requisicao} · ${r.departamento}`).join(", ") +
-                (separando.length > 2 ? "…" : "")
-          }
-          aoTocar={() => navigate("/requisicoes?filter=separando")}
+          icone={<PackageCheck />}
+          titulo="Entregues hoje"
+          valor={entregas.hoje}
+          detalhe={`ontem: ${entregas.ontem}`}
+          aoTocar={() => navigate("/requisicoes?filter=finalizada")}
         />
         <Indicador
           icone={<ClipboardList />}
