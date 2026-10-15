@@ -1661,6 +1661,62 @@ export default function DetalheRequisicao() {
                 ? "Esta requisição já está marcada como lançada."
                 : "Confira os dados abaixo, lance no TOTVS e marque como lançada."}
             </DialogDescription>
+            {/* "Onde estou": no cabeçalho, que não rola — dentro da lista a barra
+                sumia conforme a lista descia. Diz também qual é o próximo item,
+                para ler direto na volta do ALT+TAB. */}
+            {!req.lancado && linhasParaLancamento.length > 0 && (
+              <div className="mt-3 space-y-1.5">
+                <div className="flex items-center gap-3">
+                  <div
+                    className="flex-1 h-2 rounded-full bg-slate-200 overflow-hidden"
+                    role="progressbar"
+                    aria-valuenow={marcadosNoTotvs}
+                    aria-valuemin={0}
+                    aria-valuemax={linhasParaLancamento.length}
+                    aria-label="Itens já digitados no TOTVS"
+                  >
+                    <div
+                      className="h-full rounded-full bg-emerald-500 transition-all"
+                      style={{ width: `${(marcadosNoTotvs / linhasParaLancamento.length) * 100}%` }}
+                    />
+                  </div>
+                  <span className="shrink-0 text-xs font-bold text-slate-700 tabular-nums">
+                    {marcadosNoTotvs} de {linhasParaLancamento.length} no TOTVS
+                  </span>
+                  {marcadosNoTotvs > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => aplicarMarcas(req.id, new Set())}
+                      className="shrink-0 text-xs font-bold text-slate-500 hover:text-slate-800 underline underline-offset-2"
+                    >
+                      desmarcar
+                    </button>
+                  )}
+                </div>
+                <p className="text-xs leading-snug text-slate-600 [overflow-wrap:anywhere]">
+                  {proximaParaLancar ? (
+                    <>
+                      Próximo:{" "}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const botao = linhaDoLancamento.current[proximaParaLancar.id];
+                          botao?.focus({ preventScroll: true });
+                          botao?.scrollIntoView({ block: "nearest" });
+                        }}
+                        title="Mostrar na lista"
+                        className="font-bold uppercase text-amber-800 hover:underline"
+                      >
+                        {proximaParaLancar.nome} · {formatarQtd(proximaParaLancar.quantidade)} {proximaParaLancar.unidade}
+                      </button>
+                      <span className="text-slate-500"> — toque nele na lista depois de digitar.</span>
+                    </>
+                  ) : (
+                    <span className="font-bold text-emerald-700">Tudo digitado. Agora é só marcar como lançada.</span>
+                  )}
+                </p>
+              </div>
+            )}
           </DialogHeader>
 
           <div className="p-4 overflow-y-auto flex-1 space-y-4">
@@ -1684,40 +1740,6 @@ export default function DetalheRequisicao() {
                 </p>
               </div>
             </div>
-
-            {/* "Onde estou": toque em cada item depois de digitá-lo no TOTVS.
-                Só enquanto não foi marcada como lançada. */}
-            {!req.lancado && linhasParaLancamento.length > 0 && (
-              <div className="flex items-center gap-3">
-                <div
-                  className="flex-1 h-2 rounded-full bg-slate-200 overflow-hidden"
-                  role="progressbar"
-                  aria-valuenow={marcadosNoTotvs}
-                  aria-valuemin={0}
-                  aria-valuemax={linhasParaLancamento.length}
-                  aria-label="Itens já digitados no TOTVS"
-                >
-                  <div
-                    className="h-full rounded-full bg-emerald-500 transition-all"
-                    style={{ width: `${(marcadosNoTotvs / linhasParaLancamento.length) * 100}%` }}
-                  />
-                </div>
-                <span className="shrink-0 text-xs font-bold text-slate-700 tabular-nums">
-                  {marcadosNoTotvs} de {linhasParaLancamento.length} no TOTVS
-                </span>
-                {marcadosNoTotvs > 0 && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      aplicarMarcas(req.id, new Set());
-                    }}
-                    className="shrink-0 text-xs font-bold text-slate-500 hover:text-slate-800 underline underline-offset-2"
-                  >
-                    desmarcar
-                  </button>
-                )}
-              </div>
-            )}
 
             {/* Colunas na mesma ordem e com os mesmos rótulos da aba Detalhe. */}
             <div className="border border-slate-200 rounded-lg overflow-hidden">
