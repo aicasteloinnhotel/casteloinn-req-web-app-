@@ -326,15 +326,19 @@ export default function DashboardAlmoxarifado({
     for (const r of reqs) {
       if (r.status === "CANCELADA" || r.requisicao_origem_id) continue;
       if (new Date(r.created_at) < inicioDoMes) continue;
+      // O próprio almoxarifado fica de fora: o card mostra os setores que
+      // mais pedem (pedido digitado no balcão em nome do almoxarifado não é
+      // demanda de setor).
+      if (/almoxarifado/i.test(r.departamento || "")) continue;
       const chave = `${r.usuario?.nome || "Desconhecido"}|${r.departamento}`;
       contas[chave] ??= { nome: r.usuario?.nome || "Desconhecido", dep: r.departamento, count: 0 };
       contas[chave].count += 1;
     }
-    // Só as 3 pessoas que mais pedem; o total do mês dá o tamanho de cada
-    // barra (a parte do mês que é dela).
+    // As 5 pessoas que mais pedem; o total (dos setores, no mês) dá a
+    // porcentagem de cada uma.
     const ordenado = Object.values(contas).sort((a, b) => b.count - a.count);
     const total = ordenado.reduce((s, c) => s + c.count, 0);
-    return { top: ordenado.slice(0, 3), total };
+    return { top: ordenado.slice(0, 5), total };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reqs, inicioDoMes.getTime()]);
   const nomeDoMes = format(new Date(agora), "MMMM", { locale: ptBR });
@@ -722,30 +726,31 @@ export default function DashboardAlmoxarifado({
               Quem mais pede <span className="font-medium text-slate-500">· {nomeDoMes}</span>
             </h2>
             {quemMaisPede.total > 0 && (
-              <p className="text-xs text-slate-500 leading-tight tabular-nums">de {quemMaisPede.total} pedidos no mês</p>
+              <p className="text-xs text-slate-500 leading-tight tabular-nums">de {quemMaisPede.total} pedidos dos setores no mês</p>
             )}
           </div>
           {quemMaisPede.top.length === 0 ? (
             <p className="text-sm text-slate-500 mt-3">Sem pedidos neste mês ainda.</p>
           ) : (
-            <ul className="mt-3 space-y-2 lg:flex-1 lg:flex lg:flex-col lg:justify-center">
-              {quemMaisPede.top.map((p) => {
+            <ul className="mt-3 space-y-1.5 lg:space-y-1 lg:flex-1 lg:min-h-0 lg:overflow-y-auto lg:flex lg:flex-col lg:justify-center-safe">
+              {quemMaisPede.top.map((p, i) => {
                 const pct = Math.round((p.count / quemMaisPede.total) * 100);
                 // Comprimento em relação ao 1º lugar (a barra dele vai até o fim);
-                // a porcentagem diz quanto do mês é de cada um.
+                // a porcentagem diz quanto dos pedidos dos setores é de cada um.
                 const largura = Math.max(8, (p.count / quemMaisPede.top[0].count) * 100);
                 return (
                   <li
                     key={`${p.nome}|${p.dep}`}
-                    className="relative h-11 rounded-lg bg-white border border-slate-200 overflow-hidden"
-                    title={`${p.nome} — ${p.dep}: ${p.count} pedidos (${pct}% do mês)`}
+                    className="relative h-9 lg:h-8 shrink-0 rounded-lg bg-white border border-slate-200 overflow-hidden"
+                    title={`${i + 1}º — ${p.nome} (${p.dep}): ${p.count} pedidos (${pct}% dos setores no mês)`}
                   >
                     {/* Cor clara: o texto escuro fica legível por cima. */}
                     <div className="absolute inset-y-0 left-0 bg-teal-100" style={{ width: `${largura}%` }} />
-                    <div className="relative h-full flex items-center gap-2 px-3">
-                      <span className="min-w-0 flex-1 leading-tight">
-                        <span className="block text-xs font-bold text-slate-800 truncate">{p.dep}</span>
-                        <span className="block text-[11px] font-medium text-slate-600 truncate">{p.nome}</span>
+                    <div className="relative h-full flex items-center gap-2 px-2.5">
+                      <span className="w-5 shrink-0 text-center text-xs font-black text-teal-800 tabular-nums">{i + 1}º</span>
+                      <span className="min-w-0 flex-1 truncate text-xs leading-tight">
+                        <span className="font-bold text-slate-800">{p.dep}</span>
+                        <span className="font-medium text-slate-600"> · {p.nome}</span>
                       </span>
                       <span className="shrink-0 text-sm font-black text-slate-800 tabular-nums">
                         {p.count} <span className="text-[11px] font-semibold text-slate-500">({pct}%)</span>

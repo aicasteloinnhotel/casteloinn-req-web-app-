@@ -979,10 +979,12 @@ export default function DetalheRequisicao() {
           </div>
         </div>
         
-        {/* Editar/cancelar: só o dono do pedido, e só enquanto está PENDENTE.
-            O "|| perfil === SOLICITANTE" que havia aqui anulava a checagem de
-            dono e deixava um solicitante editar o pedido de outro pela URL. */}
-        {req.status === "PENDENTE" && ehDono && (
+        {/* Editar: o dono do pedido, ou o almoxarifado (para corrigir medida ou
+            item pedido errado), só enquanto está PENDENTE — depois de começar a
+            separar, a correção é na própria separação. Cancelar continua só do
+            dono. O "|| perfil === SOLICITANTE" que havia aqui anulava a checagem
+            de dono e deixava um solicitante editar o pedido de outro pela URL. */}
+        {req.status === "PENDENTE" && (ehDono || ehAlmoxarifado) && (
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full sm:w-auto">
             <Button
               onClick={() => navigate(`/requisicoes/${req.id}/editar`)}

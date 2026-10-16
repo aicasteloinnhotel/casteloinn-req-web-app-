@@ -41,6 +41,9 @@ export default function NovaRequisicao() {
   const { id } = useParams<{ id: string }>();
   const isEditMode = !!id;
   const [isInitializing, setIsInitializing] = useState(isEditMode);
+  // Na edição, de quem é o pedido: aparece só para leitura e nunca é regravado
+  // (o almoxarifado corrige itens e medidas, mas o pedido continua do setor).
+  const [donoDoPedido, setDonoDoPedido] = useState<{ nome: string; departamento: string } | null>(null);
   const { user } = useAuth();
   const navigate = useNavigate();
 
@@ -147,6 +150,7 @@ export default function NovaRequisicao() {
             if (req.usuario_id && user?.perfil !== "SOLICITANTE") {
               setSelectedUserId(req.usuario_id);
             }
+            setDonoDoPedido({ nome: req.usuario?.nome || "Solicitante", departamento: req.departamento });
             setObservacao(req.observacao || "");
 
             if (req.itens) {
@@ -274,12 +278,10 @@ export default function NovaRequisicao() {
       }));
 
       if (isEditMode && id) {
-        await updateRequisicaoCompleta(
-          id,
-          { observacao, usuario_id: selectedUserId || user.id },
-          linhas,
-          user.id
-        );
+        // Só a observação e os itens: quem pediu e o setor não mudam na edição.
+        // Antes ia também usuario_id, e um pedido sem dono gravado (ou com o
+        // seletor mexido) passava a ser de quem editou, com o setor antigo.
+        await updateRequisicaoCompleta(id, { observacao }, linhas, user.id);
         playSound('notification');
         toast.success("Requisição atualizada com sucesso!");
         navigate(`/requisicoes/${id}`);
@@ -369,7 +371,16 @@ export default function NovaRequisicao() {
       </div>
 
       <div className="space-y-6">
-        {user?.perfil !== "SOLICITANTE" && (
+        {/* Edição feita pelo almoxarifado: diz de quem é o pedido, sem deixar
+            trocar. */}
+        {isEditMode && user?.perfil !== "SOLICITANTE" && donoDoPedido && (
+          <div className="rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900">
+            Corrigindo o pedido de <strong>{donoDoPedido.nome}</strong> ({donoDoPedido.departamento}). O
+            pedido continua dele; a correção fica registrada no histórico com o seu nome.
+          </div>
+        )}
+
+        {!isEditMode && user?.perfil !== "SOLICITANTE" && (
           <Card className="shadow-xl shadow-slate-200/60 border-slate-200/60 border-slate-200">
             <CardContent className="p-4 sm:p-6">
               <Label className="text-base font-bold text-slate-700 mb-2 block">

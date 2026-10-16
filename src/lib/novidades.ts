@@ -46,7 +46,23 @@ export const VERSOES: Versao[] = [
     versao: "1.2",
     data: "15/10/2026",
     titulo: "Calculadora e marcação de itens no lançamento do TOTVS",
+    tituloTodos: "Tela sem o anúncio do Netlify",
     mudancas: [
+      {
+        tipo: "correcao",
+        texto: "Some o anúncio “Com tecnologia Netlify” que tinha aparecido no canto da tela, por cima dos botões.",
+      },
+      {
+        tipo: "novo",
+        publico: "almoxarifado",
+        texto:
+          "O almoxarifado pode corrigir uma requisição pendente (medida, item trocado ou errado) antes de separar. O pedido continua de quem pediu, e a correção fica no histórico.",
+      },
+      {
+        tipo: "melhoria",
+        publico: "almoxarifado",
+        texto: "“Quem mais pede” mostra os 5 que mais pedem, com a posição, e só os setores (sem o próprio almoxarifado).",
+      },
       {
         tipo: "novo",
         publico: "almoxarifado",

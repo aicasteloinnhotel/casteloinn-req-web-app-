@@ -392,6 +392,11 @@ export default function AjudaSobre() {
                 <Topico icone={<ListChecks />} titulo="Separar e entregar">
                   <Passos>
                     <li>
+                      Pedido com medida errada ou item trocado? Antes de separar, toque em{" "}
+                      <strong>Editar Requisição</strong> e corrija. O pedido continua de quem pediu, e a
+                      correção fica no histórico com o seu nome.
+                    </li>
+                    <li>
                       Abra a requisição e toque em <strong>Iniciar Separação</strong>. O solicitante
                       é avisado.
                     </li>

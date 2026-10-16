@@ -145,3 +145,15 @@ input[type='number']::-webkit-outer-spin-button {
   -webkit-appearance: none;
   margin: 0;
 }
+/*
+ * Esconde o selo/anúncio que o Netlify passou a colocar sozinho no site
+ * publicado ("Com tecnologia Netlify" e a janela "Crie seu próprio site"),
+ * por cima dos botões, para todos os usuários. Ele vem de um script do
+ * Netlify (/.netlify/scripts/hud), não do app: é um <iframe id="nl-badge-frame">
+ * com estilo próprio sem !important, e por isso esta regra vence.
+ * Se um dia voltar a aparecer, o Netlify mudou o identificador: conferir no
+ * site publicado e atualizar aqui.
+ */
+#nl-badge-frame {
+  display: none !important;
+}
