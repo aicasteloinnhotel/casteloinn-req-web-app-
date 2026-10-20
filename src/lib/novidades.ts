@@ -43,6 +43,19 @@ export const ROTULO_TIPO: Record<TipoMudanca, string> = {
 
 export const VERSOES: Versao[] = [
   {
+    versao: "1.3",
+    data: "20/10/2026",
+    titulo: "Adicionar item depois da entrega",
+    mudancas: [
+      {
+        tipo: "novo",
+        publico: "almoxarifado",
+        texto:
+          "Requisição entregue e ainda não lançada no TOTVS: o botão “Adicionar item”, ao lado da devolução, inclui o que foi entregue a mais. Fica no histórico com quem incluiu e o motivo. Para trocar um item, devolva o errado e adicione o certo.",
+      },
+    ],
+  },
+  {
     versao: "1.2",
     data: "15/10/2026",
     titulo: "Calculadora e marcação de itens no lançamento do TOTVS",

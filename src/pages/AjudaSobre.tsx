@@ -476,7 +476,7 @@ export default function AjudaSobre() {
                   </p>
                 </Topico>
 
-                <Topico icone={<PackageMinus />} titulo="Devolução (mandou a mais)">
+                <Topico icone={<PackageMinus />} titulo="Devolução e item a mais depois da entrega">
                   <p>
                     Entregou a mais e buscou de volta no setor? Abra a requisição entregue e toque em{" "}
                     <strong>Registrar devolução</strong>: escolha o item, quanto voltou e o motivo.
@@ -489,8 +489,13 @@ export default function AjudaSobre() {
                   <p>
                     Só antes de lançar no TOTVS. Já lançou? Toque em{" "}
                     <strong>Desfazer lançamento</strong>, registre a devolução e lance de novo.
-                    Registrou errado? Toque em <strong>Desfazer</strong> ao lado da devolução. Mandou
-                    a menos? Faça outra requisição com o que faltou.
+                    Registrou errado? Toque em <strong>Desfazer</strong> ao lado da devolução.
+                  </p>
+                  <p>
+                    Entregou um item que não estava no pedido? Ao lado da devolução, toque em{" "}
+                    <strong>Adicionar item</strong>: escolha o material, quanto saiu e o motivo. Ele entra
+                    na requisição como entregue e vai para o TOTVS. Para <strong>trocar</strong> um item,
+                    devolva o errado e adicione o certo. Tudo fica no histórico.
                   </p>
                 </Topico>
 

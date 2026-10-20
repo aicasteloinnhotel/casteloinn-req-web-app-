@@ -50,10 +50,12 @@ import {
   Undo2,
   Lock,
   PackageMinus,
+  PackagePlus,
   Calculator,
   ChevronRight
 } from "lucide-react";
 import { MiniCalculadora } from "@/components/MiniCalculadora";
+import { AdicionarItemEntregue } from "@/components/AdicionarItemEntregue";
 import { toast } from "@/lib/toast";
 import { supabase } from "@/lib/supabase";
 
@@ -94,6 +96,7 @@ const ROTULOS_HISTORICO: Record<string, string> = {
   LANCAMENTO_DESFEITO: "LANÇAMENTO DESFEITO",
   DEVOLUCAO: "DEVOLUÇÃO AO ALMOXARIFADO",
   DEVOLUCAO_DESFEITA: "DEVOLUÇÃO DESFEITA",
+  ITEM_INCLUIDO_APOS_ENTREGA: "ITEM ADICIONADO DEPOIS DA ENTREGA",
   OBSERVACAO_EDITADA: "OBSERVAÇÃO EDITADA",
 };
 
@@ -744,6 +747,9 @@ export default function DetalheRequisicao() {
     }
   };
 
+  // Item entregue que não estava no pedido (entregue e ainda não lançada).
+  const [showAdicionarItem, setShowAdicionarItem] = React.useState(false);
+
   // Devolução ao almoxarifado: mandou a mais e buscou de volta no setor.
   const [showDevolucao, setShowDevolucao] = React.useState(false);
   const [devLinhaId, setDevLinhaId] = React.useState("");
@@ -950,6 +956,9 @@ export default function DetalheRequisicao() {
   const linhasDevolviveis = (req.itens || []).filter((l) => quantidadeQueSaiu(l) > 0);
   const podeDevolver = ehAlmoxarifado && foiEntregue(req.status) && !req.lancado && linhasDevolviveis.length > 0;
   const podeDesfazerDevolucao = ehAlmoxarifado && !req.lancado;
+  // Adicionar item depois da entrega: mesma janela da devolução (entregue e
+  // ainda não lançada), mesmo sem linha para devolver.
+  const podeAdicionarItem = ehAlmoxarifado && precisaLancar(req.status) && !req.lancado;
   const linhaDevolucao = req.itens?.find((l) => l.id === devLinhaId);
   const maxDevolucao = linhaDevolucao ? quantidadeQueSaiu(linhaDevolucao) : 0;
   const qtdDevolucao = lerQuantidade(devQtd);
@@ -1291,23 +1300,40 @@ export default function DetalheRequisicao() {
 
             </div>
 
-            {podeDevolver && (
-              <div className="rounded-xl border border-violet-200 bg-violet-50/60 p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 print:hidden">
+            {(podeDevolver || podeAdicionarItem) && (
+              // Quadro neutro: cada botão leva a sua cor (roxo = devolução, verde =
+              // adicionar). Todo roxo, o "Adicionar item" parecia devolução.
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 flex flex-col gap-3 print:hidden">
                 <div className="min-w-0">
-                  <p className="text-sm font-bold text-violet-900">Mandou a mais e buscou de volta?</p>
-                  <p className="text-xs text-violet-800 mt-0.5">
-                    Registre a devolução antes de lançar no TOTVS. O entregue continua registrado;
-                    o lançamento e o comprovante passam a usar o que ficou no setor.
+                  <p className="text-sm font-bold text-slate-800">Mudou algo depois da entrega?</p>
+                  <p className="text-xs text-slate-600 mt-0.5">
+                    Antes de lançar no TOTVS: registre o que voltou ou adicione o que foi entregue a
+                    mais. Para trocar um item, devolva o errado e adicione o certo. Tudo fica no
+                    histórico.
                   </p>
                 </div>
-                <Button
-                  onClick={abrirDevolucao}
-                  variant="outline"
-                  disabled={updating}
-                  className="h-11 shrink-0 border-violet-300 bg-white text-violet-800 hover:bg-violet-100 hover:text-violet-900 font-bold"
-                >
-                  <PackageMinus className="h-4 w-4 mr-2" /> Registrar devolução
-                </Button>
+                <div className="flex flex-col sm:flex-row gap-2">
+                  {podeDevolver && (
+                    <Button
+                      onClick={abrirDevolucao}
+                      variant="outline"
+                      disabled={updating}
+                      className="h-11 sm:flex-1 border-violet-300 bg-white text-violet-800 hover:bg-violet-100 hover:text-violet-900 font-bold"
+                    >
+                      <PackageMinus className="h-4 w-4 mr-2" /> Registrar devolução
+                    </Button>
+                  )}
+                  {podeAdicionarItem && (
+                    <Button
+                      onClick={() => setShowAdicionarItem(true)}
+                      variant="outline"
+                      disabled={updating}
+                      className="h-11 sm:flex-1 border-teal-300 bg-white text-teal-800 hover:bg-teal-50 hover:text-teal-900 font-bold"
+                    >
+                      <PackagePlus className="h-4 w-4 mr-2" /> Adicionar item
+                    </Button>
+                  )}
+                </div>
               </div>
             )}
           </div>
@@ -1445,6 +1471,17 @@ export default function DetalheRequisicao() {
           </div>
         </div>
       </div>
+
+      {/* Adicionar item entregue que não estava no pedido */}
+      {podeAdicionarItem && user && (
+        <AdicionarItemEntregue
+          req={req}
+          usuarioId={user.id}
+          aberto={showAdicionarItem}
+          aoFechar={() => setShowAdicionarItem(false)}
+          aoConcluir={() => carregarDetalhes(req.id)}
+        />
+      )}
 
       {/* Registrar devolução ao almoxarifado */}
       <Dialog open={showDevolucao} onOpenChange={setShowDevolucao}>
