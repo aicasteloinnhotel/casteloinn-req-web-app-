@@ -46,7 +46,13 @@ export const VERSOES: Versao[] = [
     versao: "1.3",
     data: "20/10/2026",
     titulo: "Adicionar item depois da entrega",
+    tituloTodos: "Correção na tela do pedido",
     mudancas: [
+      {
+        tipo: "correcao",
+        texto:
+          "Na tela do pedido, o nome do item não fica mais espremido, quebrando letra por letra, quando o item tem devolução.",
+      },
       {
         tipo: "novo",
         publico: "almoxarifado",

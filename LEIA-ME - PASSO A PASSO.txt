@@ -1,0 +1,49 @@
+ATUALIZAÇÃO DO APP — VERSÃO 1.3
+===============================
+
+>> ESTA PASTA É A VERSÃO 1.3. (A que está publicada hoje, antes de subir
+   esta, é a 1.2.) Esta pasta é a única coisa a subir agora.
+>> Ela leva o app inteiro (a pasta "src" completa).
+>> NADA A FAZER NO SUPABASE nesta versão.
+
+NOVO NA 1.3 — ADICIONAR ITEM DEPOIS DA ENTREGA
+- Na requisição já entregue e ainda NÃO lançada no TOTVS, ao lado de
+  "Registrar devolução" agora tem ADICIONAR ITEM: escolha o material, quanto
+  saiu, a medida e o motivo. Ele entra na requisição como entregue e vai
+  para o lançamento no TOTVS e para o comprovante.
+- Fica no histórico do pedido: "ITEM ADICIONADO DEPOIS DA ENTREGA", com o
+  item, a quantidade, o motivo e quem adicionou.
+- Para TROCAR um item: registre a devolução do errado e adicione o certo.
+- Depois de lançada no TOTVS, os dois botões somem (como já era com a
+  devolução).
+- Só o almoxarifado vê. O quadro "Mudou algo depois da entrega?" ficou
+  neutro (cinza): o botão de devolução é roxo e o de adicionar é verde.
+
+CORREÇÃO NA 1.3 — NOME DO ITEM ESPREMIDO
+- Na tela do pedido, quando o item tinha devolução (Solicitado, Entregue,
+  Excedente e Voltou lado a lado), o nome quebrava letra por letra
+  ("FI / LE / DE..."). Agora o nome tem espaço garantido e as caixas de
+  números descem para baixo dele quando não cabem.
+
+- Na primeira vez que cada aparelho abrir o app depois da atualização,
+  aparece "Novidades da versão 1.3" (o solicitante só vê a correção do nome).
+
+
+COMO SUBIR — GITHUB + NETLIFY
+-----------------------------
+De preferência pelo 4G do celular (a rede do hotel já travou o GitHub).
+
+1. GitHub > repositório do app > "Add file" > "Upload files".
+2. Arraste a pasta "src" de dentro de
+   "SUBIR NO GITHUB (versao 1.3) - arraste a pasta src" (67 arquivos).
+   Espere todos terminarem, sem erro.
+3. Mensagem "Versão 1.3" > "Commit changes".
+4. O Netlify publica sozinho, no mesmo link. Nos aparelhos aparece o botão
+   "Atualizar". Conferir: Ajuda e Sobre > Versão 1.3.
+
+Se fizer um commit pela metade, nada quebra: o Netlify não publica e o app
+antigo continua no ar até o envio completo.
+
+DEPOIS DE PUBLICAR: me avise. A próxima mudança já vira a versão seguinte.
+
+BACKUP: "BACKUP - projeto completo v1.3.zip" (sem senhas). Guarde.

@@ -1191,15 +1191,19 @@ export default function DetalheRequisicao() {
                   key={prod.id}
                   className="p-4 bg-white border border-slate-200/80 rounded-xl shadow-lg shadow-slate-200/50"
                 >
-                <div className="flex flex-col sm:flex-row sm:justify-between items-start sm:items-center gap-3">
-                  <div className="flex-1 pr-4 min-w-0">
+                {/* O nome tem largura mínima garantida (12rem): com Solicitado,
+                    Entregue, Excedente e Voltou lado a lado, as caixas tomavam
+                    a linha e o nome quebrava letra por letra ("FI / LE / DE...").
+                    Sem espaço, as caixas descem para a linha de baixo. */}
+                <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-3">
+                  <div className="flex-1 basis-48 min-w-[12rem]">
                     <p className="font-bold text-slate-800 text-sm sm:text-base break-words">
                       {formatItemName(prod.item?.nome)}
                     </p>
                   </div>
                   {/* flex-wrap: com Solicitado, Entregue, Ruptura e Voltou são
                       quatro caixas, e no celular de 360px não cabem numa linha. */}
-                  <div className="flex flex-wrap items-center justify-end gap-x-4 gap-y-2 sm:gap-x-6 self-end sm:self-auto">
+                  <div className="flex flex-wrap items-center justify-end gap-x-4 gap-y-2 sm:gap-x-6 ml-auto">
                       <div className="text-center">
                         <p className="text-[10px] font-bold text-slate-700 uppercase mb-1">Solicitado</p>
                         <p className="text-lg font-black text-slate-700 whitespace-nowrap">{formatarQtd(prod.quantidade)} <span className="text-sm font-bold text-slate-700">{unidadeDoItem(prod)}</span></p>
