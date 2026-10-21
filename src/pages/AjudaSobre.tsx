@@ -524,9 +524,12 @@ export default function AjudaSobre() {
                     UN e KG). Só essas aparecem para quem pede.
                   </p>
                   <p>
-                    Muitos de uma vez: <strong>Importar CSV</strong> com coluna A = nome e coluna B =
-                    unidades separadas por barra (ex.: <code>UN/KG</code>). Item que já existe ganha as
-                    unidades novas; nenhuma é removida.
+                    Planilha do catálogo: <strong>Importar / Exportar</strong>. Para{" "}
+                    <strong>exportar</strong>, escolha as colunas (nome, medidas, situação) e quais itens,
+                    e copie ou baixe. Para <strong>importar</strong>, use a mesma planilha (Nome, Medidas
+                    como <code>UN/KG</code>, Situação Ativo/Inativo), escolha o que aplicar e confira a{" "}
+                    <strong>prévia</strong> antes de confirmar. Nada é apagado: medida só é acrescentada, e
+                    a situação só muda se você marcar essa opção.
                   </p>
                   <p>
                     Material que já saiu em alguma requisição não é apagado: é arquivado e continua

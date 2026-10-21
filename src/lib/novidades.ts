@@ -43,6 +43,19 @@ export const ROTULO_TIPO: Record<TipoMudanca, string> = {
 
 export const VERSOES: Versao[] = [
   {
+    versao: "1.4",
+    data: "21/10/2026",
+    titulo: "Importar e exportar a planilha de itens",
+    mudancas: [
+      {
+        tipo: "novo",
+        publico: "almoxarifado",
+        texto:
+          "Controle de Itens: um botão “Importar / Exportar”. Exporta o catálogo escolhendo as colunas (nome, medidas, situação) e quais itens; importa a mesma planilha com prévia do que vai mudar antes de gravar. Nada é apagado.",
+      },
+    ],
+  },
+  {
     versao: "1.3",
     data: "20/10/2026",
     titulo: "Adicionar item depois da entrega",

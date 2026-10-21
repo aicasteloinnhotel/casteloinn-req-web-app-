@@ -1,7 +1,6 @@
 import { useLocation } from "react-router-dom";
-import React, { useState, useEffect, useRef, useMemo } from "react";
-import Papa from "papaparse";
-import { getItens, createItem, createItens, updateItem, deleteItem, checkItemUsage, getRequisicoes } from "@/services/api";
+import React, { useState, useEffect, useMemo } from "react";
+import { getItens, createItem, updateItem, deleteItem, checkItemUsage, getRequisicoes } from "@/services/api";
 import { Item, Requisicao } from "@/types";
 import { Card } from "@/components/ui/card";
 import {
@@ -21,10 +20,11 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Plus, Edit2, CheckCircle2, XCircle, Trash2, Upload, BarChart3, Package, ArrowUpDown, X } from "lucide-react";
+import { Plus, Edit2, CheckCircle2, XCircle, Trash2, FileSpreadsheet, BarChart3, Package, ArrowUpDown, X } from "lucide-react";
+import { ImportarExportarItens } from "@/components/ImportarExportarItens";
 import { toast } from "@/lib/toast";
 import { hasSupabaseKeys } from "@/lib/supabase";
-import { contemTexto, dataInputParaLocal, formatItemName, UNIDADE_PADRAO } from "@/lib/utils";
+import { contemTexto, dataInputParaLocal, formatItemName } from "@/lib/utils";
 import { rotuloUnidade, UNIDADES_CADASTRO, unidadesDoItem } from "@/lib/unidades";
 import { calcularSaidas } from "@/lib/saidas";
 import { CampoBusca } from "@/components/CampoBusca";
@@ -33,27 +33,6 @@ import {
   CAMPO, SELETOR, SUBTITULO, TITULO,
 } from "@/lib/estilos";
 import { endOfDay, format, startOfDay } from "date-fns";
-
-/** Unidades de uma célula da planilha: "UN", "UN/KG", "UN|KG" ou "UN+KG". */
-const unidadesDaPlanilha = (celula?: string): string[] =>
-  (celula || "")
-    .split(/[\/|+]/)
-    .map((u) => u.trim().toUpperCase())
-    .filter((u, i, todas) => u && todas.indexOf(u) === i);
-
-/**
- * Lê a planilha respeitando a codificação. O Excel no Windows salva "CSV" em
- * ANSI (windows-1252), não em UTF-8: lido como UTF-8, "Água Sanitária" virava
- * "�gua Sanit�ria" no catálogo. Tenta UTF-8 estrito e, se não for, ANSI.
- */
-const lerTextoDaPlanilha = async (arquivo: File): Promise<string> => {
-  const bytes = await arquivo.arrayBuffer();
-  try {
-    return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-  } catch {
-    return new TextDecoder("windows-1252").decode(bytes);
-  }
-};
 
 /** Traduz os erros do banco que o usuário consegue resolver sozinho. */
 const mensagemDeErro = (err: any, padrao: string): string => {
@@ -80,8 +59,8 @@ export default function Itens() {
   const [itemToDelete, setItemToDelete] = useState<Item | null>(null);
   const [isCheckingUsage, setIsCheckingUsage] = useState(false);
   const [deleteError, setDeleteError] = useState("");
-  const [isImporting, setIsImporting] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  // Importar / Exportar a planilha do catálogo (janela própria).
+  const [showPlanilha, setShowPlanilha] = useState(false);
 
   const [activeTab, setActiveTab] = useState<"gerenciar" | "relatorio">(location.state?.tab || "gerenciar");
   const [filterType, setFilterType] = useState<"todos" | "inativos" | "com_saida" | "sem_saida">("todos");
@@ -252,174 +231,6 @@ export default function Itens() {
     }
   };
 
-  const handleImportClick = () => {
-    fileInputRef.current?.click();
-  };
-
-  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-
-    setIsImporting(true);
-
-    let texto: string;
-    try {
-      texto = await lerTextoDaPlanilha(file);
-    } catch (e: any) {
-      toast.error(`Erro ao ler o arquivo: ${e?.message || "arquivo ilegível"}`);
-      setIsImporting(false);
-      if (fileInputRef.current) fileInputRef.current.value = "";
-      return;
-    }
-
-    Papa.parse<string[]>(texto, {
-      skipEmptyLines: true,
-      complete: async (results) => {
-        const data = results.data as string[][];
-        if (data.length === 0) {
-          toast.error("O arquivo está vazio.");
-          setIsImporting(false);
-          if (fileInputRef.current) fileInputRef.current.value = "";
-          return;
-        }
-
-        // Detecta linha de cabeçalho
-        let startIndex = 0;
-        const firstRow = data[0];
-        if (
-          firstRow && firstRow[0] &&
-          (firstRow[0].toString().toUpperCase().includes("NOME") ||
-           firstRow[0].toString().toUpperCase().includes("ITEM"))
-        ) {
-          startIndex = 1;
-        }
-
-        try {
-          // Catálogo atual, para não recadastrar o que já existe.
-          const existentes = await getItens();
-          const porNome = new Map(existentes.map((i) => [i.nome.trim().toLowerCase(), i]));
-          const vistosNaPlanilha = new Set<string>();
-
-          const aInserir: { nome: string; unidade: string; unidades: string[]; ativo: boolean }[] = [];
-          // Item que já existe e a planilha traz unidade nova: a unidade é
-          // ACRESCENTADA (nunca removida). É o jeito rápido de dar "UN/KG" para
-          // centenas de itens de uma vez.
-          const aCompletar: { id: string; unidade: string; unidades: string[] }[] = [];
-          let ignoradas = 0;
-
-          for (let i = startIndex; i < data.length; i++) {
-            const row = data[i];
-            const nome = row[0]?.trim();
-            // Maiúscula sempre: "cx" e "CX" eram duas unidades diferentes.
-            const daPlanilha = unidadesDaPlanilha(row[1]);
-
-            if (!nome) {
-              ignoradas++;
-              continue;
-            }
-
-            const chave = nome.toLowerCase();
-            if (vistosNaPlanilha.has(chave)) {
-              ignoradas++;
-              continue;
-            }
-            vistosNaPlanilha.add(chave);
-
-            const existente = porNome.get(chave);
-            if (existente) {
-              const atuais = unidadesDoItem(existente);
-              const novas = daPlanilha.filter((u) => !atuais.includes(u));
-              if (novas.length > 0) {
-                aCompletar.push({ id: existente.id, unidade: atuais[0], unidades: [...atuais, ...novas] });
-              } else {
-                ignoradas++;
-              }
-              continue;
-            }
-
-            const unidades = daPlanilha.length > 0 ? daPlanilha : [UNIDADE_PADRAO];
-            aInserir.push({ nome, unidade: unidades[0], unidades, ativo: true });
-          }
-
-          let completados = 0;
-          for (const item of aCompletar) {
-            try {
-              await updateItem(item.id, { unidade: item.unidade, unidades: item.unidades });
-              completados++;
-            } catch (erro) {
-              console.error("Erro ao acrescentar unidades:", item.id, erro);
-            }
-          }
-          if (completados > 0) {
-            toast.success(`${completados} item(ns) já cadastrado(s) ganharam unidades novas.`);
-            if (aInserir.length === 0) carregar();
-          }
-
-          if (aInserir.length === 0) {
-            if (completados === 0) {
-              toast.warning(
-                `Nada novo na planilha (${ignoradas} linha(s) vazia(s) ou já cadastrada(s) com as mesmas unidades).`,
-              );
-            }
-            setIsImporting(false);
-            if (fileInputRef.current) fileInputRef.current.value = "";
-            return;
-          }
-
-          toast.info(`Importando ${aInserir.length} itens...`);
-
-          // Em lotes: antes era uma chamada ao servidor por linha, o que deixava
-          // a importação de um catálogo inteiro lentíssima.
-          const TAMANHO_LOTE = 100;
-          let inseridos = 0;
-          let falhas = 0;
-
-          for (let i = 0; i < aInserir.length; i += TAMANHO_LOTE) {
-            const lote = aInserir.slice(i, i + TAMANHO_LOTE);
-            try {
-              await createItens(lote);
-              inseridos += lote.length;
-            } catch (erroLote) {
-              // Um item problemático não pode derrubar o lote inteiro:
-              // repete linha a linha para isolar só o que realmente falhou.
-              console.error("Lote falhou, tentando item a item:", erroLote);
-              for (const item of lote) {
-                try {
-                  await createItem(item);
-                  inseridos++;
-                } catch (erroItem) {
-                  console.error("Erro ao importar item:", item.nome, erroItem);
-                  falhas++;
-                }
-              }
-            }
-          }
-
-          if (inseridos > 0) {
-            toast.success(`${inseridos} itens importados com sucesso!`);
-            carregar();
-          }
-          if (ignoradas > 0 || falhas > 0) {
-            toast.warning(
-              `${ignoradas} linha(s) ignorada(s) (vazias ou já cadastradas)` +
-                (falhas > 0 ? ` e ${falhas} com erro.` : "."),
-            );
-          }
-        } catch (e: any) {
-          console.error("Erro na importação:", e);
-          toast.error(`Falha na importação: ${e?.message || "erro desconhecido"}`);
-        } finally {
-          setIsImporting(false);
-          if (fileInputRef.current) fileInputRef.current.value = "";
-        }
-      },
-      error: (error) => {
-        toast.error(`Erro ao ler o arquivo: ${error.message}`);
-        setIsImporting(false);
-        if (fileInputRef.current) fileInputRef.current.value = "";
-      }
-    });
-  };
 
   // Total de saída por material (todas as unidades), para o filtro com/sem saída.
   const saidaPorItem = useMemo(() => {
@@ -597,14 +408,6 @@ export default function Itens() {
 
       {activeTab === 'gerenciar' && (
         <div className="space-y-4 animate-in fade-in duration-200">
-          <input
-            type="file"
-            accept=".csv"
-            className="hidden"
-            ref={fileInputRef}
-            onChange={handleFileUpload}
-          />
-
           {/* Barra de ações em uma linha no computador. No celular vira duas:
               busca + novo, e depois filtro + importar. */}
           <div className="flex flex-col sm:flex-row gap-2">
@@ -637,16 +440,17 @@ export default function Itens() {
                 <option value="sem_saida">Sem saída</option>
               </select>
 
+              {/* Um botão só para a planilha do catálogo: exportar (escolhendo
+                  as colunas) ou importar (com prévia antes de gravar). */}
               <Button
                 variant="outline"
-                onClick={handleImportClick}
-                disabled={isImporting}
-                title="Importar CSV (coluna A: nome; coluna B: unidades, ex.: UN/KG). Item que já existe ganha as unidades novas."
+                onClick={() => setShowPlanilha(true)}
+                title="Importar ou exportar a planilha de itens (Nome, Medidas, Situação)"
                 className={`${BOTAO_SECUNDARIO} shrink-0`}
               >
-                <Upload className="h-4 w-4 sm:mr-2 shrink-0" />
-                <span className="hidden sm:inline">{isImporting ? "Importando..." : "Importar CSV"}</span>
-                <span className="sm:hidden ml-1.5">{isImporting ? "..." : "CSV"}</span>
+                <FileSpreadsheet className="h-4 w-4 sm:mr-2 shrink-0" />
+                <span className="hidden sm:inline">Importar / Exportar</span>
+                <span className="sm:hidden ml-1.5">Planilha</span>
               </Button>
 
               <Button
@@ -889,6 +693,12 @@ export default function Itens() {
           </div>
         </DialogContent>
       </Dialog>
+      <ImportarExportarItens
+        itens={itens}
+        aberto={showPlanilha}
+        aoFechar={() => setShowPlanilha(false)}
+        aoConcluir={carregar}
+      />
     </div>
   );
 }
