@@ -1,5 +1,6 @@
 import { supabase } from "@/lib/supabase";
 import { ItemReposicao } from "@/types";
+import { camposDoEstado, type FotoDeEstado, type ModalidadeReposicao } from "@/lib/estadoReposicao";
 
 export async function getListaReposicao(): Promise<ItemReposicao[]> {
   try {
@@ -253,65 +254,76 @@ export async function subtrairPorRequisicaoEItem(requisicao_id: string, item_id:
   }
 }
 
-export type ModalidadeReposicao = "NORMAL" | "URGENTE" | "AGUARDANDO";
+// ---------------------------------------------------------------------------
+//  ESTADO DOS ITENS, UM OU VÁRIOS DE UMA VEZ
+//  Sempre pelo material (item_id): o mesmo material em duas linhas (manual e
+//  ruptura) é um item só na tela. Falha vira erro de verdade: antes o erro era
+//  engolido e a tela dizia "sucesso" mesmo sem ter gravado.
+// ---------------------------------------------------------------------------
 
-export async function updateUrgenciaReposicao(item_id: string, urgente: boolean, prazo_target_date?: number | null, prazo_original?: string | null): Promise<boolean> {
-  try {
-    const updates: any = { urgente };
-    if (prazo_target_date !== undefined) updates.prazo_target_date = prazo_target_date;
-    if (prazo_original !== undefined) updates.prazo_original = prazo_original;
+const SEM_AJUSTE_07 = "Falta rodar o AJUSTE_07 no Supabase para usar a cotação.";
 
+/** A API recusa endereços enormes: acima disto, vai em partes. */
+const TAMANHO_PARTE = 100;
+
+const emPartes = <T,>(lista: T[]): T[][] => {
+  const partes: T[][] = [];
+  for (let i = 0; i < lista.length; i += TAMANHO_PARTE) partes.push(lista.slice(i, i + TAMANHO_PARTE));
+  return partes;
+};
+
+const atualizarItensAbertos = async (itemIds: string[], campos: Record<string, unknown>) => {
+  for (const parte of emPartes(itemIds)) {
     const { error } = await supabase
       .from("reposicao_itens")
-      .update(updates)
-      .eq("item_id", item_id)
+      .update(campos)
+      .in("item_id", parte)
       .eq("resolvido", false);
-
-    if (error) throw error;
-    return true;
-  } catch (e: any) {
-    console.error("Erro ao atualizar urgencia do item:", e);
-    return false;
-  }
-}
-
-export async function updateStatusReposicao(
-  item_id: string,
-  modalidade: ModalidadeReposicao,
-  prazoStr?: string | null,
-  prazoTargetDate?: number | null
-): Promise<boolean> {
-  try {
-    const updates: any = {};
-    if (modalidade === "URGENTE") {
-      updates.urgente = true;
-      updates.prazo_original = prazoStr || "Hoje";
-      updates.prazo_target_date = prazoTargetDate !== undefined ? prazoTargetDate : null;
-    } else if (modalidade === "AGUARDANDO") {
-      updates.urgente = false;
-      updates.prazo_original = prazoStr ? `PEDIDO: ${prazoStr}` : "PEDIDO";
-      updates.prazo_target_date = prazoTargetDate !== undefined ? prazoTargetDate : null;
-    } else {
-      // NORMAL
-      updates.urgente = false;
-      updates.prazo_original = null;
-      updates.prazo_target_date = null;
+    if (error) {
+      // Coluna que a API não conhece: o app subiu antes do SQL.
+      if (error.code === "PGRST204" || error.code === "42703") throw new Error(SEM_AJUSTE_07);
+      throw new Error(error.message);
     }
-
-    const { error } = await supabase
-      .from("reposicao_itens")
-      .update(updates)
-      .eq("item_id", item_id)
-      .eq("resolvido", false);
-
-    if (error) throw error;
-    return true;
-  } catch (e: any) {
-    console.error("Erro ao atualizar modalidade/status da reposição do item:", e);
-    return false;
   }
+};
+
+/** Muda o estado. Sai da cotação: quem definiu o estado já decidiu o que fazer. */
+export async function definirEstadoDosItens(itemIds: string[], modalidade: ModalidadeReposicao, prazo?: string) {
+  await atualizarItensAbertos(itemIds, {
+    ...camposDoEstado(modalidade, prazo),
+    cotacao_lote: null,
+    cotacao_em: null,
+  });
 }
 
+/** Põe na cotação, num subgrupo novo (uma cópia para a planilha). */
+export async function moverParaCotacao(itemIds: string[]): Promise<string> {
+  const lote = crypto.randomUUID();
+  await atualizarItensAbertos(itemIds, { cotacao_lote: lote, cotacao_em: new Date().toISOString() });
+  return lote;
+}
+
+/** Volta ao estado de antes da cotação (urgência e prazo nunca foram mexidos). */
+export async function tirarDaCotacao(itemIds: string[]) {
+  await atualizarItensAbertos(itemIds, { cotacao_lote: null, cotacao_em: null });
+}
+
+/** O "Desfazer": devolve cada linha ao estado fotografado antes da ação. */
+export async function restaurarEstado(foto: FotoDeEstado[]) {
+  // Linhas com o mesmo estado vão juntas: bem menos idas ao servidor.
+  const porEstado = new Map<string, { campos: Omit<FotoDeEstado, "id">; ids: string[] }>();
+  for (const { id, ...campos } of foto) {
+    const chave = JSON.stringify(campos);
+    if (!porEstado.has(chave)) porEstado.set(chave, { campos, ids: [] });
+    porEstado.get(chave)!.ids.push(id);
+  }
+  for (const { campos, ids } of porEstado.values()) {
+    for (const parte of emPartes(ids)) {
+      const { error } = await supabase.from("reposicao_itens").update(campos).in("id", parte);
+      if (error) throw new Error(error.message);
+    }
+  }
+}
 
 export async function baixarQuantidadeReposicaoEmMassa(
   atualizacoes: { id: string; subtracao: number; itemOriginal: ItemReposicao }[],

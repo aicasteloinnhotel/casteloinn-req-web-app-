@@ -1,4 +1,4 @@
-﻿import React, { useState, useMemo, useEffect } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/lib/supabase";
@@ -6,12 +6,23 @@ import {
   getListaReposicao,
   adicionarItemReposicao,
   baixarQuantidadeReposicaoEmMassa,
-  updateUrgenciaReposicao,
-  updateStatusReposicao,
+  definirEstadoDosItens,
+  moverParaCotacao,
+  tirarDaCotacao,
+  restaurarEstado,
   excluirItemReposicaoManual,
   editarQuantidadeManual,
-  ModalidadeReposicao
 } from "@/services/reposicao";
+import {
+  fotografarEstado,
+  linhasParaCotacao,
+  PRAZOS_AGUARDANDO,
+  PRAZOS_URGENTE,
+  separarEmLotes,
+  type FotoDeEstado,
+  type ModalidadeReposicao,
+} from "@/lib/estadoReposicao";
+import { Checkbox } from "@/components/ui/checkbox";
 import { ItemReposicao, Item } from "@/types";
 import { getItens, getUsuarios } from "@/services/api";
 import { Button } from "@/components/ui/button";
@@ -38,14 +49,15 @@ import {
   Minimize2,
   Pencil,
   Trash2,
-  FileSpreadsheet
+  FileSpreadsheet,
+  Copy,
+  Undo2,
+  X
 } from "lucide-react";
-import { formatarQtd } from "@/lib/unidades";
-import { format, addDays, addWeeks, endOfDay } from "date-fns";
+import { format } from "date-fns";
 import { toast } from "@/lib/toast";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
-import { AnimatePresence, motion } from "motion/react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 
@@ -61,7 +73,13 @@ export type GroupedItem = {
   urgente?: boolean;
   prazo_target_date?: number | null;
   prazo_original?: string | null;
+  /** Em cotação: qual cópia para a planilha, e quando. */
+  lote?: string | null;
+  cotacao_em?: string | null;
 };
+
+/** "1 item", "3 itens". */
+const contarItens = (n: number) => `${n} ${n === 1 ? "item" : "itens"}`;
 
 function formatRemainingTime(targetDate: number | null | undefined, now: number) {
   if (!targetDate) return "Indefinido";
@@ -89,25 +107,97 @@ function formatRemainingTime(targetDate: number | null | undefined, now: number)
  * aparecendo só em detalhes. Aqui a seção passa a ser um cartão branco igual
  * aos outros, e a cor fica no ícone, no contador e na borda lateral do item.
  */
-const ACENTO: Record<ModalidadeReposicao, {
+type SecaoDaLista = ModalidadeReposicao | "COTACAO";
+
+const ACENTO: Record<SecaoDaLista, {
   icone: string; contador: string; bordaItem: string;
 }> = {
   URGENTE:    { icone: "bg-red-50 text-red-600",     contador: "bg-red-50 text-red-700 border-red-200",       bordaItem: "border-l-red-400" },
+  COTACAO:    { icone: "bg-sky-50 text-sky-700",     contador: "bg-sky-50 text-sky-800 border-sky-200",       bordaItem: "border-l-sky-400" },
   AGUARDANDO: { icone: "bg-amber-50 text-amber-700", contador: "bg-amber-50 text-amber-800 border-amber-200", bordaItem: "border-l-amber-400" },
   NORMAL:     { icone: "bg-teal-50 text-teal-700",   contador: "bg-slate-50 text-slate-700 border-slate-200", bordaItem: "border-l-slate-300" },
 };
 
-/** Uma seção da lista (Urgentes / Aguardando / Normais). */
-function SecaoReposicao({
-  modalidade, titulo, icone, grupos, aberta, onToggle, renderCard,
+/** As opções de estado: o mesmo menu para um item e para vários. */
+function OpcoesDeEstado({ aoEscolher }: { aoEscolher: (m: ModalidadeReposicao, prazo?: string) => void }) {
+  return (
+    <>
+      <div className="px-2 py-1 text-[10px] font-black text-amber-800 uppercase tracking-wider flex items-center gap-1.5">
+        <Truck className="w-3.5 h-3.5 text-amber-600" />
+        Aguardando chegada
+      </div>
+      {PRAZOS_AGUARDANDO.map((o) => (
+        <DropdownMenuItem
+          key={o.prazo}
+          onClick={() => aoEscolher("AGUARDANDO", o.prazo)}
+          className="text-xs font-semibold text-amber-950 focus:bg-amber-50 cursor-pointer rounded-lg py-1.5 pl-7"
+        >
+          {o.rotulo}
+        </DropdownMenuItem>
+      ))}
+      <div className="h-px bg-slate-100 my-1.5" />
+      <div className="px-2 py-1 text-[10px] font-black text-red-700 uppercase tracking-wider flex items-center gap-1.5">
+        <AlertTriangle className="w-3.5 h-3.5 text-red-600" />
+        Urgente
+      </div>
+      {PRAZOS_URGENTE.map((o) => (
+        <DropdownMenuItem
+          key={o.prazo}
+          onClick={() => aoEscolher("URGENTE", o.prazo)}
+          className="text-xs font-bold text-red-700 focus:bg-red-50 cursor-pointer rounded-lg py-1.5 pl-7"
+        >
+          {o.rotulo}
+        </DropdownMenuItem>
+      ))}
+      <div className="h-px bg-slate-100 my-1.5" />
+      <DropdownMenuItem
+        onClick={() => aoEscolher("NORMAL")}
+        className="font-medium text-slate-600 focus:bg-slate-50 cursor-pointer rounded-lg text-xs py-2 flex items-center gap-2"
+      >
+        <Clock className="w-3.5 h-3.5 text-slate-400" />
+        Normal (padrão)
+      </DropdownMenuItem>
+    </>
+  );
+}
+
+/** Caixa de marcar da lista, com área de toque maior que o desenho. */
+function CaixaDeMarcar({
+  marcado, parcial, aoMudar, rotulo,
 }: {
-  modalidade: ModalidadeReposicao;
+  marcado: boolean;
+  parcial?: boolean;
+  aoMudar: () => void;
+  rotulo: string;
+}) {
+  return (
+    <label className="-m-2 p-2 shrink-0 cursor-pointer flex">
+      <Checkbox
+        checked={marcado}
+        indeterminate={!!parcial && !marcado}
+        onCheckedChange={aoMudar}
+        aria-label={rotulo}
+        className="h-5 w-5 rounded-md border-2 border-slate-400 bg-white after:hidden data-checked:bg-teal-600 data-checked:border-teal-600 data-indeterminate:bg-teal-100 data-indeterminate:border-teal-500 data-indeterminate:text-teal-700"
+      />
+    </label>
+  );
+}
+
+/** Uma seção da lista (Urgentes / Em cotação / Aguardando / Normais). */
+function SecaoReposicao({
+  modalidade, titulo, icone, grupos, aberta, onToggle, renderCard, corpo, selecionados, aoAlternarTodos,
+}: {
+  modalidade: SecaoDaLista;
   titulo: string;
   icone: React.ReactNode;
   grupos: GroupedItem[];
   aberta: boolean;
   onToggle: () => void;
   renderCard: (g: GroupedItem) => React.ReactNode;
+  /** No lugar da lista simples (os subgrupos da cotação). */
+  corpo?: React.ReactNode;
+  selecionados: Set<string>;
+  aoAlternarTodos: (itemIds: string[]) => void;
 }) {
   const c = ACENTO[modalidade];
   const vazia = grupos.length === 0;
@@ -125,32 +215,43 @@ function SecaoReposicao({
     );
   }
 
+  const ids = grupos.map((g) => g.item_id);
+  const marcados = ids.filter((id) => selecionados.has(id)).length;
+
   return (
     <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-lg shadow-slate-200/50">
-      <button
-        type="button"
-        onClick={onToggle}
-        className="w-full text-left px-4 py-3 flex items-center justify-between transition-colors select-none hover:bg-slate-50"
-      >
-        <div className="flex items-center gap-3 min-w-0">
-          <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${c.icone}`}>
-            {icone}
+      <div className="flex items-center pl-4 hover:bg-slate-50 transition-colors">
+        <CaixaDeMarcar
+          marcado={marcados === ids.length}
+          parcial={marcados > 0}
+          aoMudar={() => aoAlternarTodos(ids)}
+          rotulo={`Marcar todos de ${titulo}`}
+        />
+        <button
+          type="button"
+          onClick={onToggle}
+          className="flex-1 min-w-0 text-left pl-3 pr-4 py-3 flex items-center justify-between select-none"
+        >
+          <div className="flex items-center gap-3 min-w-0">
+            <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${c.icone}`}>
+              {icone}
+            </div>
+            {/* A descrição de cada seção saiu: o título já diz o que é. */}
+            <h2 className="text-base font-bold text-slate-800 truncate">{titulo}</h2>
           </div>
-          {/* A descrição de cada seção saiu: o título já diz o que é. */}
-          <h2 className="text-base font-bold text-slate-800 truncate">{titulo}</h2>
-        </div>
 
-        <div className="flex items-center gap-2 shrink-0">
-          <span className={`px-2.5 py-0.5 rounded-full text-xs font-bold border ${c.contador}`}>
-            {grupos.length}
-          </span>
-          <ChevronDown className={`w-5 h-5 text-slate-400 transition-transform duration-200 ${aberta ? "rotate-180" : ""}`} />
-        </div>
-      </button>
+          <div className="flex items-center gap-2 shrink-0">
+            <span className={`px-2.5 py-0.5 rounded-full text-xs font-bold border ${c.contador}`}>
+              {grupos.length}
+            </span>
+            <ChevronDown className={`w-5 h-5 text-slate-400 transition-transform duration-200 ${aberta ? "rotate-180" : ""}`} />
+          </div>
+        </button>
+      </div>
 
       {aberta && (
         <div className="border-t border-slate-100 divide-y divide-slate-100">
-          <AnimatePresence>{grupos.map((g) => renderCard(g))}</AnimatePresence>
+          {corpo ?? grupos.map((g) => renderCard(g))}
         </div>
       )}
     </div>
@@ -212,79 +313,95 @@ export default function ListaReposicao() {
   }, []);
 
   // Accordion state
-  const [openSections, setOpenSections] = useState<Record<ModalidadeReposicao, boolean>>({
+  const [openSections, setOpenSections] = useState<Record<SecaoDaLista, boolean>>({
     URGENTE: true,
+    COTACAO: true,
     AGUARDANDO: true,
     NORMAL: true
   });
 
-  const toggleSection = (section: ModalidadeReposicao) => {
+  const toggleSection = (section: SecaoDaLista) => {
     setOpenSections(prev => ({
       ...prev,
       [section]: !prev[section]
     }));
   };
 
-  // Um controle só, que alterna: dois botões para uma escolha binária era
-  // desperdício de espaço, ainda mais no celular.
-  const algumaSecaoAberta =
-    openSections.URGENTE || openSections.AGUARDANDO || openSections.NORMAL;
+  // Itens marcados (pelo material). Continuam marcados ao mudar a busca: dá para
+  // buscar "arroz", marcar, buscar "feijão", marcar, e agir sobre os dois.
+  const [selecionados, setSelecionados] = useState<Set<string>>(new Set());
+  const [aplicando, setAplicando] = useState(false);
 
-  const alternarTodasSecoes = () => {
-    const novoEstado = !algumaSecaoAberta;
-    setOpenSections({ URGENTE: novoEstado, AGUARDANDO: novoEstado, NORMAL: novoEstado });
-  };
+  const alternarItem = (itemId: string) =>
+    setSelecionados((atual) => {
+      const novo = new Set(atual);
+      if (novo.has(itemId)) novo.delete(itemId);
+      else novo.add(itemId);
+      return novo;
+    });
 
-  const handleAlterarStatus = async (
-    itemId: string,
-    novaModalidade: ModalidadeReposicao,
-    prazoStr?: string
-  ) => {
+  /** Todos marcados: desmarca. Senão: marca os que faltam. */
+  const alternarVarios = (itemIds: string[]) =>
+    setSelecionados((atual) => {
+      const novo = new Set(atual);
+      if (itemIds.every((id) => novo.has(id))) itemIds.forEach((id) => novo.delete(id));
+      else itemIds.forEach((id) => novo.add(id));
+      return novo;
+    });
+
+  const desfazer = async (foto: FotoDeEstado[]) => {
     try {
-      if (novaModalidade === "NORMAL") {
-        await updateStatusReposicao(itemId, "NORMAL");
-        toast.success("Status redefinido para Normal.");
-      } else if (novaModalidade === "AGUARDANDO") {
-        const p = prazoStr || "Já Solicitado";
-        let targetDate: number | null = null;
-        const now = new Date();
-        if (prazoStr === "Hoje") {
-          targetDate = endOfDay(now).getTime();
-        } else if (prazoStr === "2 a 3 dias") {
-          targetDate = addDays(now, 3).getTime();
-        } else if (prazoStr === "1 semana") {
-          targetDate = addWeeks(now, 1).getTime();
-        }
-        await updateStatusReposicao(itemId, "AGUARDANDO", p, targetDate);
-        toast.success(`Marcado como Aguardando Chegada (${p})`);
-      } else if (novaModalidade === "URGENTE") {
-        const p = prazoStr || "Hoje";
-        const now = new Date();
-        let targetDate = Date.now();
-        if (p === "Hoje") {
-          targetDate = endOfDay(now).getTime();
-        } else if (p === "2 dias") {
-          targetDate = addDays(now, 2).getTime();
-        } else if (p === "3 dias") {
-          targetDate = addDays(now, 3).getTime();
-        } else if (p === "4 dias") {
-          targetDate = addDays(now, 4).getTime();
-        } else if (p === "5 dias") {
-          targetDate = addDays(now, 5).getTime();
-        } else if (p === "6 dias") {
-          targetDate = addDays(now, 6).getTime();
-        } else if (p === "1 semana") {
-          targetDate = addWeeks(now, 1).getTime();
-        }
-        await updateStatusReposicao(itemId, "URGENTE", p, targetDate);
-        toast.success(`Marcado como Urgente (${p})`);
-      }
+      await restaurarEstado(foto);
+      toast.info("Desfeito: os itens voltaram a como estavam.");
       recarregarLista(false);
     } catch (e: any) {
-      console.error(e);
-      toast.error("Erro ao atualizar status do item.");
+      toast.error(e?.message || "Não foi possível desfazer.");
     }
   };
+
+  /** Toda mudança de estado passa aqui, de um item ou de vários: com "Desfazer". */
+  const aplicar = async (itemIds: string[], acao: () => Promise<unknown>, mensagem: string) => {
+    if (itemIds.length === 0) return;
+    const foto = fotografarEstado(lista, itemIds);
+    setAplicando(true);
+    try {
+      await acao();
+      toast.success(mensagem, {
+        duration: 10000,
+        action: { label: "Desfazer", onClick: () => desfazer(foto) },
+      });
+      setSelecionados((atual) => {
+        const novo = new Set(atual);
+        itemIds.forEach((id) => novo.delete(id));
+        return novo;
+      });
+      await recarregarLista(false);
+    } catch (e: any) {
+      console.error(e);
+      toast.error(e?.message || "Não foi possível mudar o estado dos itens.");
+    } finally {
+      setAplicando(false);
+    }
+  };
+
+  const mudarEstado = (itemIds: string[], modalidade: ModalidadeReposicao, prazo?: string) => {
+    const destino =
+      modalidade === "NORMAL" ? "Normal"
+      : modalidade === "URGENTE" ? `Urgente (${prazo || "Hoje"})`
+      : "Aguardando chegada";
+    return aplicar(
+      itemIds,
+      () => definirEstadoDosItens(itemIds, modalidade, prazo),
+      `${contarItens(itemIds.length)} em ${destino}.`,
+    );
+  };
+
+  const voltarDaCotacao = (itemIds: string[]) =>
+    aplicar(
+      itemIds,
+      () => tirarDaCotacao(itemIds),
+      `${contarItens(itemIds.length)} de volta ao estado anterior.`,
+    );
 
   const recarregarLista = async (showLoading = true) => {
     if (showLoading) setIsLoading(true);
@@ -373,6 +490,11 @@ export default function ListaReposicao() {
       }
       
       const group = groups.get(item.item_id)!;
+      // Linha nova do mesmo material continua no subgrupo em que ele já está.
+      if (item.cotacao_lote && (!group.cotacao_em || (item.cotacao_em || "") > group.cotacao_em)) {
+        group.lote = item.cotacao_lote;
+        group.cotacao_em = item.cotacao_em;
+      }
       group.all_ids.push(item.id);
       group.total_quantidade += (item.quantidade || 1);
       
@@ -414,18 +536,32 @@ export default function ListaReposicao() {
     return groupedItems.filter(g => contemTexto(formatItemName(g.item?.nome), searchTerm));
   }, [groupedItems, searchTerm]);
 
-  // Automatic grouping into the 3 modalities
+  // Em cotação é uma seção à parte; quem sai dela volta para a do seu estado.
   const itensUrgentes = useMemo(() => {
-    return displayedItems.filter(i => i.modalidade === "URGENTE");
+    return displayedItems.filter(i => !i.lote && i.modalidade === "URGENTE");
   }, [displayedItems]);
 
+  const itensEmCotacao = useMemo(() => {
+    return displayedItems.filter(i => !!i.lote);
+  }, [displayedItems]);
+
+  const lotesDeCotacao = useMemo(() => separarEmLotes(itensEmCotacao), [itensEmCotacao]);
+
   const itensAguardando = useMemo(() => {
-    return displayedItems.filter(i => i.modalidade === "AGUARDANDO");
+    return displayedItems.filter(i => !i.lote && i.modalidade === "AGUARDANDO");
   }, [displayedItems]);
 
   const itensNormais = useMemo(() => {
-    return displayedItems.filter(i => i.modalidade === "NORMAL");
+    return displayedItems.filter(i => !i.lote && i.modalidade === "NORMAL");
   }, [displayedItems]);
+
+  // Vem da lista inteira, não só da busca: o que foi marcado continua valendo.
+  const gruposMarcados = useMemo(
+    () => groupedItems.filter((g) => selecionados.has(g.item_id)),
+    [groupedItems, selecionados],
+  );
+  const idsMarcados = gruposMarcados.map((g) => g.item_id);
+  const algumMarcadoEmCotacao = gruposMarcados.some((g) => !!g.lote);
 
   const handleAddItemManual = async () => {
     if (!itemAtual || !user) return;
@@ -551,38 +687,33 @@ export default function ListaReposicao() {
     }
   };
 
-  /**
-   * Copia a lista no formato da planilha de cotação (aba MODELO): PRODUTO,
-   * MARCA (em branco), UND e QTD, separados por tabulação. Clica em B3, cola,
-   * e as quatro colunas entram de uma vez. Material em duas unidades
-   * (1 UN + 2 CX) vira duas linhas: a planilha tem uma unidade por linha.
-   */
-  const handleCopiarParaCotacao = async () => {
-    const linhas: string[] = [];
-    for (const group of groupedItems) {
-      const nome = formatItemName(group.item?.nome) || "Item";
-      const porUnidade = new Map<string, number>();
-      for (const l of [...group.manual_items, ...group.rupturas]) {
-        const un = (l.unidade || group.item?.unidade || "UN").toUpperCase();
-        porUnidade.set(un, (porUnidade.get(un) || 0) + (Number(l.quantidade) || 0));
-      }
-      for (const [un, qtd] of porUnidade) {
-        linhas.push([nome, "", un, formatarQtd(qtd)].join("\t"));
-      }
-    }
-    if (linhas.length === 0) {
-      toast.info("A lista de reposição está vazia.");
-      return;
-    }
+  /** Copia para a planilha de cotação. Devolve as linhas, ou null se falhou. */
+  const copiarParaPlanilha = async (grupos: GroupedItem[]): Promise<string[] | null> => {
+    const linhas = linhasParaCotacao(grupos);
     try {
       await navigator.clipboard.writeText(linhas.join("\r\n"));
-      toast.success(
-        `${linhas.length} ${linhas.length === 1 ? "linha copiada" : "linhas copiadas"}. Na planilha, clique em B3 e cole (Ctrl+V).` +
-          (linhas.length > 32 ? " A aba MODELO tem 32 linhas: insira mais antes de colar." : ""),
-      );
+      return linhas;
     } catch {
       toast.error("O navegador não liberou a cópia. Tente de novo.");
+      return null;
     }
+  };
+
+  const avisoDaPlanilha = (linhas: string[]) =>
+    `${linhas.length} ${linhas.length === 1 ? "linha copiada" : "linhas copiadas"}: na planilha, clique em B3 e cole (Ctrl+V).` +
+    (linhas.length > 32 ? " A aba MODELO tem 32 linhas: insira mais antes de colar." : "");
+
+  /** Copia os marcados e leva para "Em cotação", num subgrupo desta cópia. */
+  const copiarECotar = async () => {
+    const linhas = await copiarParaPlanilha(gruposMarcados);
+    if (!linhas) return; // sem cópia, nada muda de lugar
+    await aplicar(idsMarcados, () => moverParaCotacao(idsMarcados), avisoDaPlanilha(linhas));
+  };
+
+  /** Só copia de novo (perdeu a cópia, colou errado). Nada muda de lugar. */
+  const copiarLoteDeNovo = async (grupos: GroupedItem[]) => {
+    const linhas = await copiarParaPlanilha(grupos);
+    if (linhas) toast.success(avisoDaPlanilha(linhas));
   };
 
   const handlePrint = () => {
@@ -607,7 +738,9 @@ export default function ListaReposicao() {
       const origemStr = origens.join(" | ");
       
       let statusStr = "Normal";
-      if (group.modalidade === 'URGENTE') {
+      if (group.lote) {
+        statusStr = "EM COTAÇÃO";
+      } else if (group.modalidade === 'URGENTE') {
         statusStr = `URGENTE${group.prazo_original ? ` (${group.prazo_original})` : ''}`;
       } else if (group.modalidade === 'AGUARDANDO') {
         statusStr = `AGUARDANDO CHEGADA / PEDIDO${group.prazo_original && group.prazo_original !== 'PEDIDO' ? ` (${group.prazo_original})` : ''}`;
@@ -643,25 +776,31 @@ export default function ListaReposicao() {
   const renderItemCard = (group: GroupedItem) => {
     const isUrgente = group.modalidade === "URGENTE";
     const isAguardando = group.modalidade === "AGUARDANDO";
+    const emCotacao = !!group.lote;
+    const marcado = selecionados.has(group.item_id);
 
     return (
-      <motion.div
-        key={group.item_id}
-        initial={{ opacity: 0, y: 6 }}
-        animate={{ opacity: 1, y: 0 }}
-        exit={{ opacity: 0, scale: 0.96 }}
-        transition={{ duration: 0.15 }}
-      >
+      // Sem animação de entrada e saída: com vários itens mudando de seção de uma
+      // vez, a linha muda na hora, e aba em segundo plano não deixa linha fantasma.
+      <div key={group.item_id}>
         {/* Item = linha branca com borda colorida à esquerda, o mesmo padrão
             do cartão de requisição no resto do app. Antes era um cartão com o
             fundo inteiro tingido, que destoava de todas as outras telas. */}
         <div
-          className={`bg-white border-l-4 transition-colors hover:bg-slate-50/70 ${
-            isUrgente ? "border-l-red-400" : isAguardando ? "border-l-amber-400" : "border-l-slate-200"
+          className={`border-l-4 transition-colors ${marcado ? "bg-teal-50/70" : "bg-white hover:bg-slate-50/70"} ${
+            emCotacao ? "border-l-sky-400" : isUrgente ? "border-l-red-400" : isAguardando ? "border-l-amber-400" : "border-l-slate-200"
           }`}
         >
-          <div className="p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-            
+          <div className="p-4 flex items-start gap-3">
+          <div className="pt-0.5">
+            <CaixaDeMarcar
+              marcado={marcado}
+              aoMudar={() => alternarItem(group.item_id)}
+              rotulo={`Marcar ${formatItemName(group.item?.nome)}`}
+            />
+          </div>
+          <div className="flex-1 min-w-0 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+
             <div className="flex-1 min-w-0">
               {/* A etiqueta de status que existia aqui foi removida: o cartão
                   já está dentro da seção "Itens Urgentes" / "Aguardando
@@ -701,7 +840,7 @@ export default function ListaReposicao() {
                     <span>•</span>
                     <span className="font-bold text-amber-800 flex items-center gap-1.5">
                       <Truck className="w-3.5 h-3.5 text-amber-600" />
-                      {group.prazo_original && group.prazo_original !== 'PEDIDO' && group.prazo_original !== 'AGUARDANDO' 
+                      {group.prazo_original && group.prazo_original !== 'PEDIDO' && group.prazo_original !== 'AGUARDANDO' && !group.prazo_original.includes('Já Solicitado')
                         ? group.prazo_original.replace('PEDIDO: ', 'Previsão: ') 
                         : 'Pedido Realizado (Aguardando Entrega)'}
                     </span>
@@ -719,7 +858,9 @@ export default function ListaReposicao() {
                   <Button 
                     variant="outline" 
                     className={`font-bold text-xs h-9 px-3 flex items-center justify-center gap-1.5 transition-colors shrink-0 ${
-                      isUrgente
+                      emCotacao
+                        ? 'border-sky-200 text-sky-800 bg-sky-50 hover:bg-sky-100'
+                        : isUrgente
                         ? 'border-red-200 text-red-700 bg-red-100/60 hover:bg-red-100'
                         : isAguardando
                         ? 'border-amber-300 text-amber-900 bg-amber-100/80 hover:bg-amber-200'
@@ -727,7 +868,12 @@ export default function ListaReposicao() {
                     }`}
                   />
                 }>
-                  {isUrgente ? (
+                  {emCotacao ? (
+                    <>
+                      <FileSpreadsheet className="h-3.5 w-3.5 text-sky-700 shrink-0" />
+                      <span>Em cotação</span>
+                    </>
+                  ) : isUrgente ? (
                     <>
                       <AlertTriangle className="h-3.5 w-3.5 text-red-600 shrink-0" />
                       <span>Urgente {group.prazo_original ? `(${group.prazo_original})` : ''}</span>
@@ -745,81 +891,21 @@ export default function ListaReposicao() {
                   )}
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" className="w-64 p-2 shadow-xl bg-white border border-slate-200 rounded-xl">
-                  
-                  {/* GRUPO AGUARDANDO / PEDIDO */}
-                  <div className="px-2 py-1 text-[10px] font-black text-amber-800 uppercase tracking-wider flex items-center gap-1.5">
-                    <Truck className="w-3.5 h-3.5 text-amber-600" />
-                    Aguardando Chegada (Pedido)
-                  </div>
-                  <DropdownMenuItem 
-                    onClick={() => handleAlterarStatus(group.item_id, 'AGUARDANDO', 'Já Solicitado')}
-                    className="font-bold text-amber-950 focus:bg-amber-50 cursor-pointer rounded-lg text-xs py-2"
-                  >
-                    <Truck className="w-3.5 h-3.5 mr-2 text-amber-600" />
-                    Marcar como Já Pedido
-                  </DropdownMenuItem>
-                  <DropdownMenuItem 
-                    onClick={() => handleAlterarStatus(group.item_id, 'AGUARDANDO', 'Hoje')}
-                    className="text-xs text-amber-900 focus:bg-amber-50 cursor-pointer rounded-lg py-1.5 pl-7"
-                  >
-                    Previsão: Chega Hoje
-                  </DropdownMenuItem>
-                  <DropdownMenuItem 
-                    onClick={() => handleAlterarStatus(group.item_id, 'AGUARDANDO', '2 a 3 dias')}
-                    className="text-xs text-amber-900 focus:bg-amber-50 cursor-pointer rounded-lg py-1.5 pl-7"
-                  >
-                    Previsão: Chega em 2 a 3 dias
-                  </DropdownMenuItem>
-                  <DropdownMenuItem 
-                    onClick={() => handleAlterarStatus(group.item_id, 'AGUARDANDO', '1 semana')}
-                    className="text-xs text-amber-900 focus:bg-amber-50 cursor-pointer rounded-lg py-1.5 pl-7"
-                  >
-                    Previsão: Chega em 1 semana
-                  </DropdownMenuItem>
-
-                  <div className="h-px bg-slate-100 my-1.5" />
-
-                  {/* GRUPO URGENTE */}
-                  <div className="px-2 py-1 text-[10px] font-black text-red-700 uppercase tracking-wider flex items-center gap-1.5">
-                    <AlertTriangle className="w-3.5 h-3.5 text-red-600" />
-                    Marcar como Urgente
-                  </div>
-                  <DropdownMenuItem 
-                    onClick={() => handleAlterarStatus(group.item_id, 'URGENTE', 'Hoje')} 
-                    className="font-bold text-red-700 focus:bg-red-50 cursor-pointer rounded-lg text-xs py-1.5 pl-7"
-                  >
-                    Prazo: Hoje
-                  </DropdownMenuItem>
-                  <DropdownMenuItem 
-                    onClick={() => handleAlterarStatus(group.item_id, 'URGENTE', '2 dias')} 
-                    className="font-bold text-red-700 focus:bg-red-50 cursor-pointer rounded-lg text-xs py-1.5 pl-7"
-                  >
-                    Prazo: 2 dias
-                  </DropdownMenuItem>
-                  <DropdownMenuItem 
-                    onClick={() => handleAlterarStatus(group.item_id, 'URGENTE', '3 dias')} 
-                    className="font-bold text-red-700 focus:bg-red-50 cursor-pointer rounded-lg text-xs py-1.5 pl-7"
-                  >
-                    Prazo: 3 dias
-                  </DropdownMenuItem>
-                  <DropdownMenuItem 
-                    onClick={() => handleAlterarStatus(group.item_id, 'URGENTE', '1 semana')} 
-                    className="font-bold text-orange-600 focus:bg-orange-50 cursor-pointer rounded-lg text-xs py-1.5 pl-7"
-                  >
-                    Prazo: 1 semana
-                  </DropdownMenuItem>
-
-                  <div className="h-px bg-slate-100 my-1.5" />
-
-                  {/* NORMAL */}
-                  <DropdownMenuItem 
-                    onClick={() => handleAlterarStatus(group.item_id, 'NORMAL')} 
-                    className="font-medium text-slate-600 focus:bg-slate-50 cursor-pointer rounded-lg text-xs py-2 flex items-center gap-2"
-                  >
-                    <Clock className="w-3.5 h-3.5 text-slate-400" />
-                    Marcar como Normal (Padrão)
-                  </DropdownMenuItem>
-
+                  {emCotacao && (
+                    <>
+                      <DropdownMenuItem
+                        onClick={() => voltarDaCotacao([group.item_id])}
+                        className="font-bold text-sky-900 focus:bg-sky-50 cursor-pointer rounded-lg text-xs py-2"
+                      >
+                        <Undo2 className="w-3.5 h-3.5 mr-2 text-sky-700" />
+                        Voltar ao estado anterior
+                      </DropdownMenuItem>
+                      <div className="h-px bg-slate-100 my-1.5" />
+                    </>
+                  )}
+                  <OpcoesDeEstado
+                    aoEscolher={(modalidade, prazo) => mudarEstado([group.item_id], modalidade, prazo)}
+                  />
                 </DropdownMenuContent>
               </DropdownMenu>
 
@@ -916,8 +1002,9 @@ export default function ListaReposicao() {
               )}
             </div>
           </div>
+          </div>
         </div>
-      </motion.div>
+      </div>
     );
   };
 
@@ -928,7 +1015,7 @@ export default function ListaReposicao() {
         {/* CABEÇALHO */}
         <div>
           <h1 className={TITULO}>Lista de Reposição</h1>
-          <p className={SUBTITULO}>Quadro de compras e reposição organizado por prioridade.</p>
+          <p className={SUBTITULO}>Marque os itens para copiar para a cotação ou mudar o estado de vários de uma vez.</p>
         </div>
 
         {/* BARRA DE AÇÕES — uma linha, no padrão das outras telas: a busca
@@ -957,17 +1044,6 @@ export default function ListaReposicao() {
               className={BOTAO_ICONE}
             >
               <Printer className="w-4 h-4" />
-            </Button>
-            {/* Cola direto na planilha de cotação: produto, marca, und, qtd. */}
-            <Button
-              onClick={handleCopiarParaCotacao}
-              type="button"
-              variant="outline"
-              title="Copiar para a planilha de cotação"
-              aria-label="Copiar para a planilha de cotação"
-              className={BOTAO_ICONE}
-            >
-              <FileSpreadsheet className="w-4 h-4" />
             </Button>
             <Button
               onClick={() => setShowHistoryModal(true)}
@@ -1007,6 +1083,65 @@ export default function ListaReposicao() {
               aberta={openSections.URGENTE}
               onToggle={() => toggleSection("URGENTE")}
               renderCard={renderItemCard}
+              selecionados={selecionados}
+              aoAlternarTodos={alternarVarios}
+            />
+
+            <SecaoReposicao
+              modalidade="COTACAO"
+              titulo="Em cotação"
+              icone={<FileSpreadsheet className="w-5 h-5" />}
+              grupos={itensEmCotacao}
+              aberta={openSections.COTACAO}
+              onToggle={() => toggleSection("COTACAO")}
+              renderCard={renderItemCard}
+              selecionados={selecionados}
+              aoAlternarTodos={alternarVarios}
+              corpo={lotesDeCotacao.map((l) => {
+                const ids = l.grupos.map((g) => g.item_id);
+                const marcados = ids.filter((id) => selecionados.has(id)).length;
+                return (
+                  <div key={l.lote}>
+                    {/* Um subgrupo por cópia para a planilha. */}
+                    <div className="pl-4 pr-2 py-2 bg-sky-50/70 flex flex-wrap items-center gap-x-3 gap-y-1">
+                      <CaixaDeMarcar
+                        marcado={marcados === ids.length}
+                        parcial={marcados > 0}
+                        aoMudar={() => alternarVarios(ids)}
+                        rotulo="Marcar todos desta cotação"
+                      />
+                      <p className="flex-1 min-w-[10rem] text-sm font-bold text-sky-900">
+                        {l.em ? `Copiados em ${format(new Date(l.em), "dd/MM 'às' HH:mm")}` : "Em cotação"}
+                        <span className="font-medium text-sky-800"> · {contarItens(ids.length)}</span>
+                      </p>
+                      <div className="flex items-center gap-1 ml-auto">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => copiarLoteDeNovo(l.grupos)}
+                          title="Copiar estes itens de novo para a planilha"
+                          className="h-9 px-2.5 text-xs font-bold text-sky-900 hover:bg-sky-100"
+                        >
+                          <Copy className="h-3.5 w-3.5 mr-1.5" /> Copiar de novo
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          disabled={aplicando}
+                          onClick={() => voltarDaCotacao(ids)}
+                          title="Todos voltam ao estado de antes da cotação"
+                          className="h-9 px-2.5 text-xs font-bold text-sky-900 hover:bg-sky-100"
+                        >
+                          <Undo2 className="h-3.5 w-3.5 mr-1.5" /> Voltar todos
+                        </Button>
+                      </div>
+                    </div>
+                    <div className="divide-y divide-slate-100">
+                      {l.grupos.map((g) => renderItemCard(g))}
+                    </div>
+                  </div>
+                );
+              })}
             />
 
             <SecaoReposicao
@@ -1017,6 +1152,8 @@ export default function ListaReposicao() {
               aberta={openSections.AGUARDANDO}
               onToggle={() => toggleSection("AGUARDANDO")}
               renderCard={renderItemCard}
+              selecionados={selecionados}
+              aoAlternarTodos={alternarVarios}
             />
 
             <SecaoReposicao
@@ -1027,8 +1164,60 @@ export default function ListaReposicao() {
               aberta={openSections.NORMAL}
               onToggle={() => toggleSection("NORMAL")}
               renderCard={renderItemCard}
+              selecionados={selecionados}
+              aoAlternarTodos={alternarVarios}
             />
 
+          </div>
+        )}
+
+        {/* BARRA DOS MARCADOS: fica presa ao pé da tela enquanto a lista rola. */}
+        {gruposMarcados.length > 0 && (
+          <div className="sticky bottom-3 z-20 rounded-2xl bg-teal-900 text-white shadow-2xl p-3 space-y-2">
+            <div className="flex items-center gap-2">
+              <p className="flex-1 text-sm font-bold">
+                {gruposMarcados.length === 1 ? "1 item marcado" : `${gruposMarcados.length} itens marcados`}
+              </p>
+              <button
+                type="button"
+                onClick={() => setSelecionados(new Set())}
+                className="h-8 px-2 rounded-lg text-xs font-bold text-teal-100 hover:bg-white/10 flex items-center gap-1"
+              >
+                <X className="h-3.5 w-3.5" /> Limpar
+              </button>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                onClick={copiarECotar}
+                disabled={aplicando}
+                className="h-11 flex-1 min-w-[8.5rem] px-2 bg-white text-teal-900 hover:bg-teal-50 font-bold"
+              >
+                <Copy className="h-4 w-4 mr-1.5 shrink-0" />
+                <span className="sm:hidden">Copiar e cotar</span>
+                <span className="hidden sm:inline">Copiar para cotação</span>
+              </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger
+                  disabled={aplicando}
+                  render={<Button className="h-11 flex-1 min-w-[8.5rem] px-2 border-0 bg-white/15 hover:bg-white/25 text-white font-bold" />}
+                >
+                  <Clock className="h-4 w-4 mr-1.5 shrink-0" /> Mudar estado <ChevronDown className="h-4 w-4 ml-1 shrink-0" />
+                </DropdownMenuTrigger>
+                <DropdownMenuContent side="top" align="end" className="w-64 p-2 shadow-xl bg-white border border-slate-200 rounded-xl">
+                  <OpcoesDeEstado aoEscolher={(modalidade, prazo) => mudarEstado(idsMarcados, modalidade, prazo)} />
+                </DropdownMenuContent>
+              </DropdownMenu>
+              {algumMarcadoEmCotacao && (
+                <Button
+                  onClick={() => voltarDaCotacao(idsMarcados)}
+                  disabled={aplicando}
+                  title="Tira da cotação e volta ao estado de antes"
+                  className="h-11 flex-1 min-w-[10rem] border-0 bg-white/15 hover:bg-white/25 text-white font-bold"
+                >
+                  <Undo2 className="h-4 w-4 mr-2" /> Estado anterior
+                </Button>
+              )}
+            </div>
           </div>
         )}
       </div>

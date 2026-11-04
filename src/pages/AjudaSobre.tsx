@@ -511,9 +511,16 @@ export default function AjudaSobre() {
                     a lista para cotação.
                   </p>
                   <p>
-                    O ícone de <strong>planilha</strong> copia a lista no formato da planilha de
-                    cotação (produto, marca, unidade e quantidade): na planilha, clique em{" "}
-                    <strong>B3</strong> e cole com Ctrl+V.
+                    Para mexer em vários, marque o círculo de cada item (o do título marca a seção
+                    inteira) e use a barra de baixo: <strong>Mudar estado</strong> vale para todos os
+                    marcados, e <strong>Desfazer</strong> aparece logo depois de cada mudança.
+                  </p>
+                  <p>
+                    Para cotar, marque os itens e toque em <strong>Copiar para cotação</strong>: na
+                    planilha, clique em <strong>B3</strong> e cole com Ctrl+V. Eles passam para{" "}
+                    <strong>Em cotação</strong>, em um subgrupo por cópia. Dali, copie de novo,
+                    volte um item ou todos ao estado anterior, ou mude o estado (já pedido, por
+                    exemplo).
                   </p>
                 </Topico>
 

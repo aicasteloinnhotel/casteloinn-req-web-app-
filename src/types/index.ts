@@ -124,6 +124,9 @@ export interface ItemReposicao {
   prazo_original?: string;
   /** Unidade em que o material faltou. Vazia = unidade do catálogo. */
   unidade?: string | null;
+  /** Em cotação: qual cópia para a planilha (AJUSTE_07). Vazio = não está. */
+  cotacao_lote?: string | null;
+  cotacao_em?: string | null;
   created_at: string;
   item?: Item;
   requisicao?: {

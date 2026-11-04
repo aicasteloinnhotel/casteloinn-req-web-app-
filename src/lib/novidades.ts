@@ -43,6 +43,25 @@ export const ROTULO_TIPO: Record<TipoMudanca, string> = {
 
 export const VERSOES: Versao[] = [
   {
+    versao: "1.5",
+    data: "04/11/2026",
+    titulo: "Itens “Em cotação” e vários itens de uma vez na Lista de Reposição",
+    mudancas: [
+      {
+        tipo: "novo",
+        publico: "almoxarifado",
+        texto:
+          "Lista de Reposição: marque só os itens que quer cotar e copie. Eles vão para a nova seção “Em cotação”, em um subgrupo por cópia, e voltam ao estado anterior quando quiser.",
+      },
+      {
+        tipo: "melhoria",
+        publico: "almoxarifado",
+        texto:
+          "Mudar o estado ficou mais rápido: marque vários itens (ou uma seção inteira) e escolha urgente, aguardando entrega ou normal de uma vez. Toda mudança tem “Desfazer”.",
+      },
+    ],
+  },
+  {
     versao: "1.4",
     data: "21/10/2026",
     titulo: "Importar e exportar a planilha de itens",
