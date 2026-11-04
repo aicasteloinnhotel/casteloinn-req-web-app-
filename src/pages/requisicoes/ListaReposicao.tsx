@@ -1173,51 +1173,56 @@ export default function ListaReposicao() {
 
         {/* BARRA DOS MARCADOS: fica presa ao pé da tela enquanto a lista rola. */}
         {gruposMarcados.length > 0 && (
-          <div className="sticky bottom-3 z-20 rounded-2xl bg-teal-900 text-white shadow-2xl p-3 space-y-2">
-            <div className="flex items-center gap-2">
-              <p className="flex-1 text-sm font-bold">
-                {gruposMarcados.length === 1 ? "1 item marcado" : `${gruposMarcados.length} itens marcados`}
-              </p>
-              <button
-                type="button"
-                onClick={() => setSelecionados(new Set())}
-                className="h-8 px-2 rounded-lg text-xs font-bold text-teal-100 hover:bg-white/10 flex items-center gap-1"
-              >
-                <X className="h-3.5 w-3.5" /> Limpar
-              </button>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <Button
-                onClick={copiarECotar}
+          <div className="sticky bottom-3 z-20 mx-auto flex w-fit max-w-full items-center gap-1 rounded-xl border border-slate-200 bg-white p-1.5 shadow-md">
+            <button
+              type="button"
+              onClick={() => setSelecionados(new Set())}
+              aria-label="Limpar marcação"
+              title="Limpar marcação"
+              className="h-8 w-7 shrink-0 rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-700 flex items-center justify-center"
+            >
+              <X className="h-4 w-4" />
+            </button>
+            <p className="mr-1.5 whitespace-nowrap text-sm font-bold text-slate-700">
+              {gruposMarcados.length}
+              <span className="max-[359px]:hidden"> {gruposMarcados.length === 1 ? "item" : "itens"}</span>
+              <span className="hidden sm:inline"> {gruposMarcados.length === 1 ? "marcado" : "marcados"}</span>
+            </p>
+            <Button
+              onClick={copiarECotar}
+              disabled={aplicando}
+              className="h-8 px-2.5 bg-teal-600 hover:bg-teal-700 font-bold text-white shadow-none"
+            >
+              <Copy className="h-3.5 w-3.5 max-[359px]:hidden" />
+              <span className="sm:hidden">Copiar</span>
+              <span className="hidden sm:inline">Copiar para cotação</span>
+            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger
                 disabled={aplicando}
-                className="h-11 flex-1 min-w-[8.5rem] px-2 bg-white text-teal-900 hover:bg-teal-50 font-bold"
+                render={<Button variant="outline" className="h-8 px-2.5 font-bold text-slate-700 shadow-none" />}
               >
-                <Copy className="h-4 w-4 mr-1.5 shrink-0" />
-                <span className="sm:hidden">Copiar e cotar</span>
-                <span className="hidden sm:inline">Copiar para cotação</span>
+                <span className="sm:hidden">Estado</span>
+                <span className="hidden sm:inline">Mudar estado</span>
+                <ChevronDown className="h-3.5 w-3.5" />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent side="top" align="end" className="w-64 p-2 shadow-xl bg-white border border-slate-200 rounded-xl">
+                <OpcoesDeEstado aoEscolher={(modalidade, prazo) => mudarEstado(idsMarcados, modalidade, prazo)} />
+              </DropdownMenuContent>
+            </DropdownMenu>
+            {algumMarcadoEmCotacao && (
+              <Button
+                variant="outline"
+                onClick={() => voltarDaCotacao(idsMarcados)}
+                disabled={aplicando}
+                aria-label="Voltar ao estado anterior"
+                title="Tira da cotação e volta ao estado de antes"
+                className="h-8 px-2 sm:px-2.5 font-bold text-slate-700 shadow-none"
+              >
+                <Undo2 className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline">Estado anterior</span>
               </Button>
-              <DropdownMenu>
-                <DropdownMenuTrigger
-                  disabled={aplicando}
-                  render={<Button className="h-11 flex-1 min-w-[8.5rem] px-2 border-0 bg-white/15 hover:bg-white/25 text-white font-bold" />}
-                >
-                  <Clock className="h-4 w-4 mr-1.5 shrink-0" /> Mudar estado <ChevronDown className="h-4 w-4 ml-1 shrink-0" />
-                </DropdownMenuTrigger>
-                <DropdownMenuContent side="top" align="end" className="w-64 p-2 shadow-xl bg-white border border-slate-200 rounded-xl">
-                  <OpcoesDeEstado aoEscolher={(modalidade, prazo) => mudarEstado(idsMarcados, modalidade, prazo)} />
-                </DropdownMenuContent>
-              </DropdownMenu>
-              {algumMarcadoEmCotacao && (
-                <Button
-                  onClick={() => voltarDaCotacao(idsMarcados)}
-                  disabled={aplicando}
-                  title="Tira da cotação e volta ao estado de antes"
-                  className="h-11 flex-1 min-w-[10rem] border-0 bg-white/15 hover:bg-white/25 text-white font-bold"
-                >
-                  <Undo2 className="h-4 w-4 mr-2" /> Estado anterior
-                </Button>
-              )}
-            </div>
+            )}
           </div>
         )}
       </div>
