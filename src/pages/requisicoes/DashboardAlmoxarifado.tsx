@@ -27,6 +27,7 @@ import {
   ResponsiveContainer,
 } from "recharts";
 import { descreverQuantidades, foiEntregue, formatItemName, precisaLancar } from "@/lib/utils";
+import { imprimirPdf } from "@/lib/imprimir";
 import { BotaoSuspenderRequisicoes } from "@/components/PausaInventario";
 import { useBloqueio } from "@/contexts/BloqueioContext";
 import { useAuth } from "@/contexts/AuthContext";
@@ -429,7 +430,7 @@ export default function DashboardAlmoxarifado({
       alternateRowStyles: { fillColor: [248, 250, 252] } // slate-50
     });
 
-    doc.save(`lista_reposicao_${format(new Date(), "yyyyMMdd_HHmm")}.pdf`);
+    imprimirPdf(doc);
   };
 
 

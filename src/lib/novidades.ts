@@ -43,6 +43,25 @@ export const ROTULO_TIPO: Record<TipoMudanca, string> = {
 
 export const VERSOES: Versao[] = [
   {
+    versao: "1.5.1",
+    data: "10/11/2026",
+    titulo: "Data certa no Lançar no TOTVS e impressão direta",
+    mudancas: [
+      {
+        tipo: "correcao",
+        publico: "almoxarifado",
+        texto:
+          "Lançar no TOTVS: a data é a da entrega (quando a requisição foi finalizada), não a do pedido. Se forem diferentes, a data do pedido aparece embaixo, menor.",
+      },
+      {
+        tipo: "melhoria",
+        publico: "almoxarifado",
+        texto:
+          "Imprimir no computador abre direto a janela da impressora, sem passar pela aba do PDF. Vale para a requisição, a Lista de Reposição e o painel.",
+      },
+    ],
+  },
+  {
     versao: "1.5",
     data: "04/11/2026",
     titulo: "Itens “Em cotação” e vários itens de uma vez na Lista de Reposição",

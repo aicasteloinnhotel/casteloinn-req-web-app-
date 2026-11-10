@@ -28,6 +28,7 @@ import {
 } from "@/services/api";
 import { ObservacaoDestaque } from "@/components/ObservacaoDestaque";
 import { playSound } from "@/lib/sounds";
+import { imprimirPdf } from "@/lib/imprimir";
 import { Requisicao, Historico, Devolucao } from "@/types";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
@@ -273,6 +274,10 @@ export default function DetalheRequisicao() {
     h.acao.includes('RUPTURA_TOTAL') ||
     h.acao === 'CONFERÊNCIA_FINALIZADA'
   );
+
+  // No TOTVS a data é a da saída do material, não a do pedido: uma requisição
+  // que ficou aguardando entra no dia em que foi finalizada.
+  const dataDaEntrega = finalizacaoHist?.created_at ?? req?.termo_aceito_em ?? req?.created_at ?? "";
 
   // A consulta principal não traz o conferente (não há join para conferente_id),
   // então buscamos o nome à parte; se a coluna não existir, cai no histórico.
@@ -631,8 +636,7 @@ export default function DetalheRequisicao() {
     }
 
     if (mode === 'print') {
-      doc.autoPrint();
-      window.open(doc.output('bloburl'), '_blank');
+      imprimirPdf(doc);
     } else {
       doc.save(`Requisicao_${req.codigo_requisicao || req.id.substring(0, 5)}.pdf`);
     }
@@ -1778,8 +1782,13 @@ export default function DetalheRequisicao() {
               <div className="bg-slate-50 border-2 border-slate-300 rounded-lg p-3">
                 <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Data</p>
                 <p className="text-xl font-black text-slate-800 tabular-nums">
-                  {format(new Date(req.created_at), "dd/MM/yyyy")}
+                  {format(new Date(dataDaEntrega), "dd/MM/yyyy")}
                 </p>
+                {format(new Date(dataDaEntrega), "dd/MM/yyyy") !== format(new Date(req.created_at), "dd/MM/yyyy") && (
+                  <p className="text-[11px] text-slate-500 tabular-nums">
+                    pedida em {format(new Date(req.created_at), "dd/MM")}
+                  </p>
+                )}
               </div>
             </div>
 

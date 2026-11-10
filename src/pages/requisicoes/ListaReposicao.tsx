@@ -29,6 +29,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
 import { contemTexto, descreverQuantidades, formatItemName } from "@/lib/utils";
+import { imprimirPdf } from "@/lib/imprimir";
 import { CampoBusca } from "@/components/CampoBusca";
 import { BOTAO_ICONE, BOTAO_PRIMARIO, SUBTITULO, TITULO } from "@/lib/estilos";
 import { 
@@ -768,8 +769,7 @@ export default function ListaReposicao() {
       },
     });
 
-    doc.autoPrint();
-    window.open(doc.output('bloburl'), '_blank');
+    imprimirPdf(doc);
   };
 
   // Render individual item card
