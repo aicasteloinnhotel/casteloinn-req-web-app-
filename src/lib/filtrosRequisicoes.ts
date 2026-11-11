@@ -18,6 +18,8 @@ export type FiltrosRequisicoes = {
   dataInicial: string;
   dataFinal: string;
   painelAberto: boolean;
+  /** Ordem da lista (ver ordemRequisicoes.ts). Não é filtro: não esconde nada. */
+  ordem: string;
 };
 
 const PREFIXO = "filtros_requisicoes:";

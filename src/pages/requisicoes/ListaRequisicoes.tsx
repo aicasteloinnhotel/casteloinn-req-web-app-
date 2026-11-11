@@ -4,8 +4,10 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { format, startOfDay, endOfDay } from "date-fns";
 import { contemTexto, dataInputParaLocal, formatItemName, precisaLancar } from "@/lib/utils";
 import { lerFiltros, salvarFiltros } from "@/lib/filtrosRequisicoes";
+import { ORDEM_PADRAO, ORDENS, ehOrdem, ordenarEmGrupos, type OrdemRequisicoes } from "@/lib/ordemRequisicoes";
 import { Button } from "@/components/ui/button";
-import { Plus, RefreshCcw, Filter, FilterX, X, ArrowLeft, ClipboardList, ClipboardCheck } from "lucide-react";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { Plus, RefreshCcw, Filter, FilterX, X, ArrowLeft, ArrowUpDown, Check, ClipboardList, ClipboardCheck } from "lucide-react";
 import { hasSupabaseKeys } from "@/lib/supabase";
 import { useRequisicoesSync } from "@/hooks/useRequisicoesSync";
 import { RequisicaoCard } from "@/components/RequisicaoCard";
@@ -79,6 +81,14 @@ export default function ListaRequisicoes() {
   const [buscaNumero, setBuscaNumero] = useState(salvos.numero || "");
   const numeroBuscado = buscaNumero.replace(/\D/g, "");
 
+  // Ordem da lista: só o almoxarifado escolhe (o solicitante vê só as dele,
+  // e setor/solicitante não fazem sentido para ele). Guardada como os filtros.
+  const [ordem, setOrdem] = useState<OrdemRequisicoes>(() =>
+    ehAlmoxarifado && ehOrdem(salvos.ordem) ? salvos.ordem : ORDEM_PADRAO
+  );
+  const ordemLigada = ordem !== ORDEM_PADRAO;
+  const rotuloDaOrdem = ORDENS.find((o) => o.valor === ordem)?.rotulo || "";
+
   useEffect(() => {
     salvarFiltros(user?.id, {
       numero: buscaNumero,
@@ -89,8 +99,9 @@ export default function ListaRequisicoes() {
       dataInicial: advDateStart,
       dataFinal: advDateEnd,
       painelAberto: showAdvanced,
+      ordem,
     });
-  }, [user?.id, buscaNumero, buscaItem, quickFilter, filtroLancamento, advDept, advDateStart, advDateEnd, showAdvanced]);
+  }, [user?.id, buscaNumero, buscaItem, quickFilter, filtroLancamento, advDept, advDateStart, advDateEnd, showAdvanced, ordem]);
 
   // O atalho do painel já virou filtro guardado: tira da URL, senão um F5
   // depois de trocar o filtro voltaria para o do atalho.
@@ -151,6 +162,8 @@ export default function ListaRequisicoes() {
 
     return result;
   }, [reqs, quickFilter, filtroLancamento, advDept, advDateStart, advDateEnd, buscaItemAdiada, numeroBuscado]);
+
+  const grupos = useMemo(() => ordenarEmGrupos(requisicoes, ordem), [requisicoes, ordem]);
 
   // Algum filtro além das buscas (item, número)? É o que avisa "nos filtros atuais".
   const outrosFiltrosAtivos =
@@ -331,6 +344,41 @@ export default function ListaRequisicoes() {
             >
               <Filter className="w-4 h-4" />
             </Button>
+
+            {/* Ordenar: não esconde nada, só muda a ordem (e agrupa). */}
+            {ehAlmoxarifado && (
+              <DropdownMenu>
+                <DropdownMenuTrigger
+                  render={
+                    <Button
+                      variant="outline"
+                      title={`Ordenar: ${rotuloDaOrdem.toLowerCase()}`}
+                      aria-label="Ordenar a lista"
+                      className={`h-11 w-11 p-0 shrink-0 border-slate-200 ${
+                        ordemLigada ? "bg-teal-50 text-teal-700 border-teal-200" : "bg-white text-slate-600 hover:text-slate-900"
+                      }`}
+                    />
+                  }
+                >
+                  <ArrowUpDown className="w-4 h-4" />
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-56 p-1.5 bg-white border border-slate-200 rounded-xl shadow-lg">
+                  <p className="px-2 pt-1 pb-1.5 text-[10px] font-black text-slate-500 uppercase tracking-wider">Ordenar</p>
+                  {ORDENS.map((o) => (
+                    <DropdownMenuItem
+                      key={o.valor}
+                      onClick={() => setOrdem(o.valor)}
+                      className={`cursor-pointer rounded-lg py-2 text-sm flex items-center gap-2 ${
+                        o.valor === ordem ? "font-bold text-teal-800" : "font-medium text-slate-700"
+                      }`}
+                    >
+                      <Check className={`h-4 w-4 shrink-0 ${o.valor === ordem ? "text-teal-600" : "invisible"}`} />
+                      {o.rotulo}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
           </div>
         </div>
       </div>
@@ -415,9 +463,23 @@ export default function ListaRequisicoes() {
 
         {/* Filtros ligados, cada um com o seu X, e o "Limpar filtros" que
             zera tudo de uma vez. Só aparece quando há filtro. */}
-        {filtrosLigados.length > 0 && (
+        {/* A ordem fora da padrão também ganha etiqueta (outra cor: não é
+            filtro, não esconde nada), e o "Limpar filtros" não mexe nela. */}
+        {(filtrosLigados.length > 0 || ordemLigada) && (
           <div className="flex flex-wrap items-center gap-2">
-            <span className="text-xs font-semibold text-slate-500">Filtros:</span>
+            {ordemLigada && (
+              <button
+                type="button"
+                onClick={() => setOrdem(ORDEM_PADRAO)}
+                title="Voltar para mais recentes primeiro"
+                className="inline-flex max-w-full items-center gap-1 h-7 pl-2 pr-1.5 rounded-full border border-slate-200 bg-slate-100 text-xs font-semibold text-slate-700 hover:bg-slate-200 transition-colors"
+              >
+                <ArrowUpDown className="h-3.5 w-3.5 shrink-0 opacity-70" />
+                <span className="truncate">{rotuloDaOrdem}</span>
+                <X className="h-3.5 w-3.5 shrink-0 opacity-70" />
+              </button>
+            )}
+            {filtrosLigados.length > 0 && <span className="text-xs font-semibold text-slate-500">Filtros:</span>}
             {filtrosLigados.map((f) => (
               <button
                 key={f.chave}
@@ -430,13 +492,15 @@ export default function ListaRequisicoes() {
                 <X className="h-3.5 w-3.5 shrink-0 opacity-70" />
               </button>
             ))}
-            <button
-              type="button"
-              onClick={limparTodosOsFiltros}
-              className="ml-auto inline-flex items-center gap-1.5 h-8 px-3 rounded-lg border border-slate-200 bg-white text-xs font-bold text-slate-700 shadow-sm hover:bg-red-50 hover:text-red-700 hover:border-red-200 transition-colors"
-            >
-              <FilterX className="h-4 w-4" /> Limpar filtros
-            </button>
+            {filtrosLigados.length > 0 && (
+              <button
+                type="button"
+                onClick={limparTodosOsFiltros}
+                className="ml-auto inline-flex items-center gap-1.5 h-8 px-3 rounded-lg border border-slate-200 bg-white text-xs font-bold text-slate-700 shadow-sm hover:bg-red-50 hover:text-red-700 hover:border-red-200 transition-colors"
+              >
+                <FilterX className="h-4 w-4" /> Limpar filtros
+              </button>
+            )}
           </div>
         )}
 
@@ -508,9 +572,19 @@ export default function ListaRequisicoes() {
           )}
         </div>
       ) : (
-        <div className="grid gap-2 sm:gap-3">
-          {requisicoes.map((req) => (
-            <RequisicaoCard key={req.id} req={req} buscaItem={buscaItemAdiada} />
+        <div className="space-y-5">
+          {grupos.map((g) => (
+            <section key={g.titulo ?? "todas"} className="grid gap-2 sm:gap-3">
+              {g.titulo && (
+                <h2 className="flex items-baseline gap-1.5 px-1 text-xs font-black uppercase tracking-wider text-slate-600">
+                  <span className="truncate">{g.titulo}</span>
+                  <span className="font-semibold text-slate-400">· {g.reqs.length}</span>
+                </h2>
+              )}
+              {g.reqs.map((req) => (
+                <RequisicaoCard key={req.id} req={req} buscaItem={buscaItemAdiada} />
+              ))}
+            </section>
           ))}
         </div>
       )}

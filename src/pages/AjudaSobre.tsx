@@ -299,7 +299,7 @@ export default function AjudaSobre() {
                 Procurando uma requisição? No funil (<strong>filtros</strong>) dá para buscar pelo{" "}
                 <strong>número</strong>, por item, departamento e data. Os filtros ligados aparecem
                 acima da lista; <strong>Limpar filtros</strong> tira todos de uma vez. O botão de
-                setas atualiza a lista na hora.
+                seta circular atualiza a lista na hora.
               </p>
               <p>O significado de cada cor está em “O que significa cada status”, mais abaixo.</p>
             </Topico>
@@ -473,6 +473,12 @@ export default function AjudaSobre() {
                     O filtro <strong>A lançar</strong>, na lista de Requisições, mostra o que ainda
                     falta. Marcou por engano? Abra de novo e toque em{" "}
                     <strong>Desfazer lançamento</strong>.
+                  </p>
+                  <p>
+                    Para lançar setor por setor, use o botão de <strong>ordenar</strong> (setas para
+                    cima e para baixo, ao lado do funil): <strong>Por setor</strong> agrupa a lista
+                    com um título por setor. Ordenar não esconde nada, só muda a ordem, e vale junto
+                    com os filtros. Também ordena por status, por solicitante e por data.
                   </p>
                 </Topico>
 

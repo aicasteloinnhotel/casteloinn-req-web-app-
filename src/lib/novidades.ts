@@ -43,6 +43,19 @@ export const ROTULO_TIPO: Record<TipoMudanca, string> = {
 
 export const VERSOES: Versao[] = [
   {
+    versao: "1.6",
+    data: "11/11/2026",
+    titulo: "Ordenar a lista de Requisições",
+    mudancas: [
+      {
+        tipo: "novo",
+        publico: "almoxarifado",
+        texto:
+          "Requisições: botão de ordenar ao lado do funil. Mais recentes, mais antigas, por setor, por status ou por solicitante; nos três últimos a lista ganha um título por grupo. Não esconde nada e vale junto com os filtros.",
+      },
+    ],
+  },
+  {
     versao: "1.5.1",
     data: "10/11/2026",
     titulo: "Data certa no Lançar no TOTVS e impressão direta",
