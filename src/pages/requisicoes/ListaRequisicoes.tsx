@@ -8,7 +8,7 @@ import { ORDEM_PADRAO, ORDENS, ehOrdem, ordenarEmGrupos, type OrdemRequisicoes }
 import {
   ABA_PADRAO, abaDoAtalho, abasPara, casaComBusca, ehAba, estaNaAba, numeroDaBusca, type AbaRequisicoes,
 } from "@/lib/abasRequisicoes";
-import { ABA_ATIVA, ABA_INATIVA, BOTAO_ICONE, BOTAO_PRIMARIO, CAMPO, SUBTITULO, TITULO } from "@/lib/estilos";
+import { ABA_ATIVA, ABA_INATIVA, BOTAO_ICONE, BOTAO_ICONE_LIGADO, BOTAO_PRIMARIO, CAMPO, TITULO } from "@/lib/estilos";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Plus, RefreshCcw, Filter, FilterX, X, ArrowLeft, ArrowUpDown, Check, Search } from "lucide-react";
@@ -37,8 +37,6 @@ type FiltroLancamento = "TODOS" | "A_LANCAR" | "LANCADAS";
 const ABA_DA_FILA =
   "flex flex-auto sm:flex-1 items-center justify-center gap-1.5 sm:gap-2 h-9 sm:h-auto px-2.5 sm:px-3 rounded-md text-[13px] sm:text-sm font-bold whitespace-nowrap transition-colors";
 
-// Funil ou ordem ligados: o mesmo botão de ícone, em verde-claro (como antes).
-const BOTAO_ICONE_LIGADO = "h-11 w-11 p-0 shrink-0 bg-teal-50 text-teal-700 border-teal-200";
 
 const ROTULO_DO_CAMPO ="text-[10px] font-bold text-slate-700 uppercase tracking-wider mb-1 block";
 
@@ -238,11 +236,6 @@ export default function ListaRequisicoes() {
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <h1 className={TITULO}>Requisições</h1>
-          <p className={SUBTITULO}>
-            {user?.perfil === "SOLICITANTE"
-              ? "Acompanhe seus pedidos."
-              : "Central operacional do Almoxarifado."}
-          </p>
         </div>
         <div className="flex items-center gap-2 shrink-0">
           <Button

@@ -27,7 +27,7 @@ import { toast } from "@/lib/toast";
 import { hasSupabaseKeys } from "@/lib/supabase";
 import { CampoBusca } from "@/components/CampoBusca";
 import { contemTexto } from "@/lib/utils";
-import { BOTAO_ICONE, BOTAO_PRIMARIO, SELETOR, SUBTITULO, TITULO } from "@/lib/estilos";
+import { BOTAO_ICONE, BOTAO_PRIMARIO, SELETOR, TITULO } from "@/lib/estilos";
 
 /** Traduz os erros do banco que fazem sentido para quem está cadastrando. */
 const mensagemDeErro = (err: any, padrao: string): string => {
@@ -252,7 +252,6 @@ export default function Usuarios() {
     <div className="space-y-6 max-w-5xl mx-auto pb-10">
       <div>
         <h1 className={TITULO}>Gerenciar Usuários</h1>
-        <p className={SUBTITULO}>Controle de acesso ao sistema de requisições.</p>
       </div>
 
       {/* Uma linha no computador, duas no celular — o mesmo padrão da tela de
@@ -335,8 +334,7 @@ export default function Usuarios() {
               <FileSpreadsheet className="h-5 w-5 shrink-0" /> Exportar usuários
             </DialogTitle>
             <DialogDescription>
-              Todos os {usuarios.length} usuários ({usuarios.filter((u) => u.ativo).length} ativos), por
-              departamento: login, departamento, perfil, situação e data de cadastro.
+              {usuarios.length} usuários · {usuarios.filter((u) => u.ativo).length} ativos
             </DialogDescription>
           </DialogHeader>
 

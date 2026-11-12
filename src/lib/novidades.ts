@@ -43,6 +43,27 @@ export const ROTULO_TIPO: Record<TipoMudanca, string> = {
 
 export const VERSOES: Versao[] = [
   {
+    versao: "1.8",
+    data: "12/11/2026",
+    titulo: "Nova Requisição mais fácil no celular",
+    mudancas: [
+      {
+        tipo: "melhoria",
+        texto:
+          "Tela de Nova Requisição refeita: a busca fica no alto e o teclado não cobre mais os resultados. Toque no material, escolha a unidade e a quantidade ali mesmo e adicione. O botão Enviar fica sempre no pé da tela.",
+      },
+      {
+        tipo: "melhoria",
+        texto:
+          "A observação das complementares ficou curta: “Complementar da #368” no lugar do texto comprido de antes.",
+      },
+      {
+        tipo: "melhoria",
+        texto: "Telas mais limpas: saíram textos de explicação que só repetiam o óbvio.",
+      },
+    ],
+  },
+  {
     versao: "1.7",
     data: "12/11/2026",
     titulo: "Lista de Requisições mais prática",

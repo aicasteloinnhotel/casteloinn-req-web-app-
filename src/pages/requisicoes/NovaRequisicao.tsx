@@ -1,41 +1,99 @@
-import { QuantitySelector } from "@/components/QuantitySelector";
 import React, { useState, useEffect, useMemo, useRef } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { getItens, createRequisicao, getUsuarios, getRequisicao, updateRequisicaoCompleta } from "@/services/api";
 import { Item } from "@/types";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
-import { Label } from "@/components/ui/label";
-import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
-import { Trash2, Plus, Minus, ArrowLeft, Search, List, PauseCircle, MessageSquareWarning } from "lucide-react";
+import { Trash2, Plus, Minus, ArrowLeft, Search, List, PauseCircle, MessageSquareWarning, Send, X } from "lucide-react";
 import { toast } from "@/lib/toast";
 import { playSound } from "@/lib/sounds";
-import { contemTexto, formatItemName, UNIDADE_PADRAO } from "@/lib/utils";
+import { formatItemName, UNIDADE_PADRAO } from "@/lib/utils";
 import { opcoesDeUnidade, rotuloUnidade, unidadesDoItem } from "@/lib/unidades";
+import { adicionarAoPedido, buscarItens, jaNoPedido, type LinhaPedido } from "@/lib/pedido";
+import {
+  ABA,
+  ABA_ATIVA,
+  ABA_INATIVA,
+  BOTAO_ICONE,
+  BOTAO_ICONE_LIGADO,
+  BOTAO_PRIMARIO,
+  CAMPO,
+  SELETOR,
+  TITULO,
+} from "@/lib/estilos";
 import { useBloqueio } from "@/contexts/BloqueioContext";
-
-/** Uma linha do pedido em construção. */
-type LinhaPedido = {
-  item_id: string;
-  quantidade: number;
-  unidade: string;
-  item?: Item;
-};
 
 type Rascunho = {
   selecionados: LinhaPedido[];
   observacao: string;
   selectedUserId: string;
 };
+
+/** Caixa branca com linhas divididas: a mesma da tabela de Requisições. */
+const LISTA = "bg-white rounded-xl border border-slate-200 shadow-lg shadow-slate-200/50 overflow-hidden divide-y divide-slate-100";
+const ROTULO_DO_CAMPO = "text-[10px] font-bold text-slate-700 uppercase tracking-wider mb-1 block";
+
+/** Computador (mouse): depois de adicionar, o cursor volta para a busca. No
+ *  celular não, senão o teclado abria sozinho a cada item. */
+const temMouse = () => typeof window !== "undefined" && window.matchMedia?.("(pointer: fine)").matches;
+
+/** − quantidade +, na altura dos outros campos (44px). */
+function Contador({
+  valor,
+  aoMudar,
+  rotulo,
+  inputRef,
+  aoConfirmar,
+}: {
+  valor: number | "";
+  aoMudar: (v: number | "") => void;
+  rotulo: string;
+  inputRef?: React.Ref<HTMLInputElement>;
+  aoConfirmar?: () => void;
+}) {
+  const atual = typeof valor === "number" ? valor : 0;
+  const mudar = (v: number) => aoMudar(Math.max(0, Math.round(v * 1000) / 1000));
+  return (
+    <div className="flex items-center h-11 shrink-0 rounded-lg border border-slate-200 bg-white shadow-sm overflow-hidden">
+      <button
+        type="button"
+        onClick={() => mudar(atual - 1)}
+        disabled={atual <= 0}
+        aria-label="Diminuir quantidade"
+        className="h-full w-10 flex items-center justify-center text-slate-600 hover:bg-slate-100 disabled:opacity-40 disabled:hover:bg-transparent touch-manipulation"
+      >
+        <Minus className="h-4 w-4" />
+      </button>
+      <input
+        ref={inputRef}
+        type="number"
+        inputMode="decimal"
+        enterKeyHint="done"
+        step="any"
+        min={0}
+        value={valor}
+        onChange={(e) => aoMudar(e.target.value === "" ? "" : Number(e.target.value))}
+        onFocus={(e) => e.target.select()}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && aoConfirmar) {
+            e.preventDefault();
+            aoConfirmar();
+          }
+        }}
+        aria-label={rotulo}
+        className="h-full w-14 text-center text-base font-bold text-slate-800 border-x border-slate-200 focus:outline-none focus:bg-teal-50 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+      />
+      <button
+        type="button"
+        onClick={() => mudar(atual + 1)}
+        aria-label="Aumentar quantidade"
+        className="h-full w-10 flex items-center justify-center text-slate-600 hover:bg-slate-100 touch-manipulation"
+      >
+        <Plus className="h-4 w-4" />
+      </button>
+    </div>
+  );
+}
 
 export default function NovaRequisicao() {
   const { id } = useParams<{ id: string }>();
@@ -46,23 +104,34 @@ export default function NovaRequisicao() {
   const [donoDoPedido, setDonoDoPedido] = useState<{ nome: string; departamento: string } | null>(null);
   const { user } = useAuth();
   const navigate = useNavigate();
+  const ehSolicitante = user?.perfil === "SOLICITANTE";
 
   const [estoqueItens, setEstoqueItens] = useState<Item[]>([]);
   const [usuarios, setUsuarios] = useState<any[]>([]);
   const [selectedUserId, setSelectedUserId] = useState<string>("");
   const [selecionados, setSelecionados] = useState<LinhaPedido[]>([]);
   const [observacao, setObservacao] = useState("");
+  const [obsAberta, setObsAberta] = useState(false);
   const [loading, setLoading] = useState(false);
-
-  // Campos do selecionador
-  const [buscaItem, setBuscaItem] = useState("");
-  const [itemAtual, setItemAtual] = useState("");
-  const [qntAtual, setQntAtual] = useState<number | "">(1);
-  // Começa vazia de propósito: a pessoa escolhe a unidade. Com UN já marcado,
-  // "5 de carne" virava 5 UN quando a intenção era 5 KG.
-  const [unidadeAtual, setUnidadeAtual] = useState<string>("");
-  const [dialogOpen, setDialogOpen] = useState(false);
   const { bloqueio } = useBloqueio();
+
+  // Busca: o que foi digitado, a lista inteira aberta pelo botão, o material
+  // aberto para escolher quantidade e unidade.
+  const [busca, setBusca] = useState("");
+  const [navegando, setNavegando] = useState(false);
+  const [aberto, setAberto] = useState<string | null>(null);
+  const [qtdAberta, setQtdAberta] = useState<number | "">(1);
+  // Começa vazia de propósito quando há mais de uma: a pessoa escolhe a
+  // unidade. Com UN já marcado, "5 de carne" virava 5 UN quando era 5 KG.
+  const [unidadeAberta, setUnidadeAberta] = useState("");
+  const [destaque, setDestaque] = useState<number | null>(null);
+  const [alturaPainel, setAlturaPainel] = useState(360);
+
+  const ancoraRef = useRef<HTMLDivElement>(null);
+  const buscaRef = useRef<HTMLInputElement>(null);
+  const painelRef = useRef<HTMLDivElement>(null);
+  const qtdRef = useRef<HTMLInputElement>(null);
+  const linhasRef = useRef<(HTMLDivElement | null)[]>([]);
 
   // Rascunho por usuário: em um tablet compartilhado, a chave única fazia o
   // pedido em andamento de uma camareira aparecer para a próxima que logasse.
@@ -174,59 +243,113 @@ export default function NovaRequisicao() {
     load();
   }, [user, id, isEditMode, navigate]);
 
-  const itensFiltrados = useMemo(() => {
-    if (!buscaItem.trim()) return estoqueItens;
-    return estoqueItens.filter((i) => contemTexto(i.nome, buscaItem));
-  }, [buscaItem, estoqueItens]);
+  const painelAberto = navegando || busca.trim().length > 0;
+  const resultados = useMemo(
+    () => (painelAberto ? buscarItens(estoqueItens, busca) : []),
+    [painelAberto, busca, estoqueItens],
+  );
 
-  const itemSelecionado = estoqueItens.find((i) => i.id === itemAtual);
-  // Só as unidades cadastradas para ESTE material (ex.: carne = UN e KG).
-  const unidadesDoSelecionado = itemSelecionado ? unidadesDoItem(itemSelecionado) : [];
+  // A lista de resultados cabe sempre ACIMA do teclado do celular: a altura
+  // acompanha o pedaço da tela que está visível (visualViewport) e a lista
+  // rola por dentro. Antes ela descia por baixo do teclado.
+  useEffect(() => {
+    if (!painelAberto) return;
+    const vv = window.visualViewport;
+    let quadro = 0;
+    const medir = () => {
+      cancelAnimationFrame(quadro);
+      quadro = requestAnimationFrame(() => {
+        const el = painelRef.current;
+        if (!el) return;
+        const fundo = vv ? vv.offsetTop + vv.height : window.innerHeight;
+        const livre = Math.floor(fundo - el.getBoundingClientRect().top - 12);
+        setAlturaPainel(Math.min(520, Math.max(180, livre)));
+      });
+    };
+    medir();
+    vv?.addEventListener("resize", medir);
+    vv?.addEventListener("scroll", medir);
+    window.addEventListener("resize", medir);
+    window.addEventListener("scroll", medir, true);
+    return () => {
+      cancelAnimationFrame(quadro);
+      vv?.removeEventListener("resize", medir);
+      vv?.removeEventListener("scroll", medir);
+      window.removeEventListener("resize", medir);
+      window.removeEventListener("scroll", medir, true);
+    };
+  }, [painelAberto]);
 
-  /** Escolhe o material. Se ele só tem uma unidade, não há o que escolher. */
-  const escolherItem = (item: Item) => {
-    setItemAtual(item.id);
-    setBuscaItem("");
-    const unidades = unidadesDoItem(item);
-    setUnidadeAtual(unidades.length === 1 ? unidades[0] : "");
+  // Abriu a lista (primeira letra ou o botão): a busca sobe para o alto. Só ao
+  // tocar no campo não bastava — com o pedido vazio a página era curta demais
+  // para rolar, e o espaço de baixo só aparece quando a lista abre.
+  useEffect(() => {
+    if (painelAberto) subirBusca();
+  }, [painelAberto]);
+
+  // Item recém-adicionado: fica verde-claro por um instante e aparece na tela.
+  useEffect(() => {
+    if (destaque === null) return;
+    linhasRef.current[destaque]?.scrollIntoView({ block: "nearest" });
+    const t = setTimeout(() => setDestaque(null), 1600);
+    return () => clearTimeout(t);
+  }, [destaque]);
+
+  /** Leva a busca para o alto da tela: o que aparece embaixo dela fica à vista. */
+  const subirBusca = () => {
+    // Sem animação: a rolagem suave era interrompida pelo teclado abrindo.
+    setTimeout(() => ancoraRef.current?.scrollIntoView({ block: "start" }), 250);
   };
 
-  const handleAddItem = () => {
-    if (!itemAtual || !qntAtual || Number(qntAtual) <= 0) {
-      toast.error("Selecione um item e informe uma quantidade válida.");
+  const fecharPainel = () => {
+    setBusca("");
+    setNavegando(false);
+    setAberto(null);
+  };
+
+  /** Abre o material na própria lista para escolher quantidade e unidade. */
+  const abrirItem = (item: Item) => {
+    if (aberto === item.id) {
+      setAberto(null);
       return;
     }
-    if (!unidadeAtual) {
-      toast.error("Escolha a unidade: UN, KG, CX...");
-      return;
-    }
-
-    const itemObj = estoqueItens.find((i) => i.id === itemAtual);
-    if (!itemObj) return;
-
-    // Mesmo item em unidades diferentes são linhas diferentes (2 CX + 3 UN).
-    const existe = selecionados.findIndex(
-      (s) => s.item_id === itemAtual && s.unidade === unidadeAtual,
-    );
-    if (existe >= 0) {
-      const novos = [...selecionados];
-      novos[existe] = {
-        ...novos[existe],
-        quantidade: novos[existe].quantidade + Number(qntAtual),
-      };
-      setSelecionados(novos);
+    const unidades = unidadesDoItem(item);
+    setAberto(item.id);
+    setQtdAberta(1);
+    setUnidadeAberta(unidades.length === 1 ? unidades[0] : "");
+    if (temMouse()) {
+      setTimeout(() => qtdRef.current?.focus(), 0);
     } else {
-      setSelecionados([
-        ...selecionados,
-        { item_id: itemAtual, quantidade: Number(qntAtual), unidade: unidadeAtual, item: itemObj },
-      ]);
+      // Fecha o teclado: a escolha de quantidade e unidade fica toda à vista.
+      buscaRef.current?.blur();
     }
+  };
 
-    setItemAtual("");
-    setQntAtual(1);
-    setUnidadeAtual("");
-    setBuscaItem("");
-    toast.success("Item adicionado ao pedido.");
+  const adicionarAberto = () => {
+    const item = estoqueItens.find((i) => i.id === aberto);
+    if (!item) return;
+    const quantidade = Number(qtdAberta);
+    if (!quantidade || quantidade <= 0) {
+      toast.error("Informe a quantidade.");
+      return;
+    }
+    if (!unidadeAberta) {
+      toast.error("Escolha a unidade.");
+      return;
+    }
+    const { linhas, posicao } = adicionarAoPedido(selecionados, {
+      item_id: item.id,
+      quantidade,
+      unidade: unidadeAberta,
+      item,
+    });
+    setSelecionados(linhas);
+    setAberto(null);
+    setBusca("");
+    // Na lista inteira, ela continua aberta para escolher o próximo; na busca,
+    // fecha e o item aparece destacado no pedido.
+    if (!navegando) setDestaque(posicao);
+    if (temMouse()) buscaRef.current?.focus();
   };
 
   const handleRemoverItem = (index: number) => {
@@ -248,6 +371,8 @@ export default function NovaRequisicao() {
       atuais.map((linha, i) => (i === index ? { ...linha, unidade: novaUnidade } : linha)),
     );
   };
+
+  const voltar = () => navigate(ehSolicitante ? "/" : "/requisicoes");
 
   const handleSubmit = async () => {
     if (selecionados.length === 0) {
@@ -333,312 +458,269 @@ export default function NovaRequisicao() {
         </div>
         <p className="font-bold text-slate-800">Novas requisições estão suspensas</p>
         <p className="text-sm text-slate-600">
-          {bloqueio.motivo || "Inventário em andamento"}. Assim que o almoxarifado liberar, dá
-          para pedir de novo — se você já tinha começado um pedido, ele continua guardado.
+          {bloqueio.motivo || "Inventário em andamento"}. Seu pedido fica guardado.
         </p>
-        <Button
-          variant="outline"
-          onClick={() => navigate(user?.perfil === "SOLICITANTE" ? "/" : "/requisicoes")}
-          className="font-bold"
-        >
+        <Button variant="outline" onClick={voltar} className="font-bold">
           Voltar
         </Button>
       </div>
     );
   }
 
+  const total = selecionados.length;
+
   return (
-    <div className="space-y-6 max-w-2xl mx-auto pb-10">
+    <div className="space-y-4 max-w-2xl mx-auto pb-4">
+      {/* Cabeçalho */}
       <div className="flex items-center gap-3">
-        {/* Antes só o solicitante tinha o botão de voltar; no celular o
-            almoxarifado ficava sem saída nesta tela. */}
         <Button
           variant="ghost"
           size="icon"
-          onClick={() => navigate(user?.perfil === "SOLICITANTE" ? "/" : "/requisicoes")}
-          className="rounded-full shrink-0 hover:bg-slate-200 text-teal-900"
+          onClick={voltar}
+          aria-label="Voltar"
+          className="rounded-full bg-slate-100 hover:bg-slate-200 text-teal-900 shrink-0"
         >
-          <ArrowLeft className="h-6 w-6" />
+          <ArrowLeft className="h-5 w-5" />
         </Button>
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight text-teal-900 dark:text-teal-100">
-            {isEditMode ? "Editar Requisição" : "Nova Requisição"}
-          </h1>
-          <p className="text-slate-700 text-sm">
-            {isEditMode ? "Edite os itens e quantidades." : "Adicione os itens ao pedido."}
-          </p>
-        </div>
+        <h1 className={`${TITULO} min-w-0`}>{isEditMode ? "Editar requisição" : "Nova requisição"}</h1>
       </div>
 
-      <div className="space-y-6">
-        {/* Edição feita pelo almoxarifado: diz de quem é o pedido, sem deixar
-            trocar. */}
-        {isEditMode && user?.perfil !== "SOLICITANTE" && donoDoPedido && (
-          <div className="rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900">
-            Corrigindo o pedido de <strong>{donoDoPedido.nome}</strong> ({donoDoPedido.departamento}). O
-            pedido continua dele; a correção fica registrada no histórico com o seu nome.
-          </div>
-        )}
+      {/* Edição feita pelo almoxarifado: diz de quem é o pedido, sem deixar trocar. */}
+      {isEditMode && !ehSolicitante && donoDoPedido && (
+        <div className="rounded-xl border border-sky-200 bg-sky-50 px-3 py-2.5 text-sm text-sky-900">
+          Pedido de <strong>{donoDoPedido.nome}</strong> ({donoDoPedido.departamento})
+        </div>
+      )}
 
-        {!isEditMode && user?.perfil !== "SOLICITANTE" && (
-          <Card className="shadow-xl shadow-slate-200/60 border-slate-200/60 border-slate-200">
-            <CardContent className="p-4 sm:p-6">
-              <Label className="text-base font-bold text-slate-700 mb-2 block">
-                Solicitante (Você está criando em nome de outra pessoa)
-              </Label>
-              <select
-                className="w-full h-12 bg-white border border-slate-300 rounded-md px-3 text-slate-700 font-medium focus:outline-none focus:ring-2 focus:ring-teal-500"
-                value={selectedUserId}
-                onChange={(e) => setSelectedUserId(e.target.value)}
-              >
-                <option value="">-- Selecione o Solicitante (opcional) --</option>
-                {usuarios.map(u => (
-                  <option key={u.id} value={u.id}>{u.nome} ({u.departamento})</option>
-                ))}
-              </select>
-            </CardContent>
-          </Card>
-        )}
+      {/* Almoxarifado criando em nome de outra pessoa: um seletor só, sem cartão. */}
+      {!isEditMode && !ehSolicitante && (
+        <div>
+          <label htmlFor="pedido-para" className={ROTULO_DO_CAMPO}>Pedido para</label>
+          <select
+            id="pedido-para"
+            value={selectedUserId}
+            onChange={(e) => setSelectedUserId(e.target.value)}
+            className={`${SELETOR} w-full`}
+          >
+            <option value="">Você mesmo ({user?.departamento})</option>
+            {usuarios.map(u => (
+              <option key={u.id} value={u.id}>{u.nome} ({u.departamento})</option>
+            ))}
+          </select>
+        </div>
+      )}
 
-        {/* Observação no topo, à vista desde o começo: no fim do formulário,
-            só aparecia depois do primeiro item e passava batido. É nela que
-            vem o aviso que evita erro na separação. */}
-        <div className="rounded-xl border-2 border-amber-300 bg-amber-50 p-4 space-y-2">
-          <Label htmlFor="observacao-pedido" className="flex items-center gap-1.5 text-sm font-bold text-amber-900">
-            <MessageSquareWarning className="h-4 w-4 shrink-0" /> Observação (opcional)
-          </Label>
-          <Textarea
+      {/* Observação: à vista desde o começo, mas só como um botão discreto até
+          ser usada (o mesmo "Adicionar observação" da tela da requisição). */}
+      {obsAberta || observacao.trim() ? (
+        <div className="rounded-xl border-2 border-amber-300 bg-amber-50 p-3 space-y-1.5">
+          <label htmlFor="observacao-pedido" className="flex items-center gap-1.5 text-[11px] font-black uppercase tracking-wider text-amber-800">
+            <MessageSquareWarning className="h-4 w-4 shrink-0" /> Observação
+          </label>
+          <textarea
             id="observacao-pedido"
-            placeholder="Algo que o almoxarifado precisa saber? Ex.: entregar só amanhã; é para o evento de hoje à noite..."
-            className="min-h-[72px] border-amber-300 resize-y bg-white p-3 text-base"
+            rows={2}
+            autoFocus={obsAberta && !observacao}
             value={observacao}
             onChange={(e) => setObservacao(e.target.value)}
+            onBlur={() => { if (!observacao.trim()) setObsAberta(false); }}
+            placeholder="Ex.: entregar só amanhã; é para o evento de hoje à noite"
+            className="w-full rounded-lg border border-amber-300 bg-white p-2.5 text-base text-slate-800 resize-y focus:outline-none focus:ring-2 focus:ring-amber-500"
           />
         </div>
+      ) : (
+        <button
+          type="button"
+          onClick={() => setObsAberta(true)}
+          className="w-full sm:w-auto inline-flex items-center justify-center gap-1.5 h-9 px-3 rounded-lg border border-dashed border-slate-300 text-sm font-semibold text-slate-600 hover:border-amber-400 hover:bg-amber-50 hover:text-amber-900 transition-colors"
+        >
+          <Plus className="h-4 w-4" /> Adicionar observação
+        </button>
+      )}
 
-        <Card className="shadow-xl shadow-slate-200/60 border-slate-200/60 border-slate-200">
-          <CardContent className="p-4 sm:p-6 space-y-4">
-            <div className="space-y-3">
-              <Label className="text-base font-bold text-slate-700">
-                Adicionar Item
-              </Label>
-              {!itemAtual ? (
-                <div className="space-y-2 relative">
-                  <div className="flex items-center gap-2 relative">
-                    <div className="relative flex-1">
-                      <Search className="absolute left-3 top-3 h-5 w-5 text-slate-700" />
-                      <Input
-                        placeholder="Qual material você precisa?"
-                        value={buscaItem}
-                        onChange={(e) => setBuscaItem(e.target.value)}
-                        className="pl-10 h-12 bg-white border-slate-300 focus-visible:ring-teal-500"
-                      />
-                    </div>
-                    <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-                      <DialogTrigger
-                        render={
-                          <Button variant="outline" size="icon" className="h-12 w-12 border-slate-300 bg-white hover:bg-slate-50 flex-shrink-0 text-slate-700 hover:text-slate-700" title="Ver todos os materiais" />
-                        }
-                      >
-                        <List className="h-5 w-5" />
-                      </DialogTrigger>
-                      <DialogContent className="max-w-md w-full max-h-[85vh] flex flex-col overflow-hidden bg-slate-50 p-0">
-                        <DialogHeader className="p-4 bg-white border-b border-slate-200">
-                          <DialogTitle className="text-slate-800">Todos os Materiais</DialogTitle>
-                        </DialogHeader>
-                        <div className="flex-1 overflow-y-auto p-2 space-y-1">
-                           {[...estoqueItens].sort((a, b) => a.nome.localeCompare(b.nome)).map(item => (
-                             <div
-                               key={item.id}
-                               onClick={() => {
-                                 escolherItem(item);
-                                 setDialogOpen(false);
-                               }}
-                               className="p-3 bg-white border border-slate-200 rounded-lg cursor-pointer hover:border-teal-400 hover:shadow-md hover:shadow-teal-100 transition-all"
-                             >
-                               <p className="font-bold text-slate-800">{item.nome}</p>
-                               <p className="text-xs font-medium text-slate-700 mt-0.5">{unidadesDoItem(item).join(" · ")}</p>
-                             </div>
-                           ))}
-                           {estoqueItens.length === 0 && (
-                              <div className="p-4 text-center text-slate-700 text-sm">Nenhum material cadastrado.</div>
-                           )}
+      {/* Busca: presa no alto ao rolar. Os resultados ficam logo abaixo dela e
+          nunca passam por baixo do teclado. */}
+      <div ref={ancoraRef} className={`h-0 mb-0 ${ehSolicitante ? "scroll-mt-16" : ""}`} aria-hidden />
+      <div className={`sticky ${ehSolicitante ? "top-16" : "top-0"} z-20 -mx-1 px-1 py-1.5 bg-slate-50`}>
+        <div className="flex gap-2">
+          <div className="relative flex-1 min-w-0">
+            <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+            <input
+              ref={buscaRef}
+              type="search"
+              enterKeyHint="search"
+              autoComplete="off"
+              value={busca}
+              onChange={(e) => { setBusca(e.target.value); setAberto(null); }}
+              onFocus={subirBusca}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && resultados[0]) {
+                  e.preventDefault();
+                  abrirItem(resultados[0]);
+                }
+                if (e.key === "Escape") fecharPainel();
+              }}
+              placeholder="Buscar material"
+              aria-label="Buscar material"
+              className={`${CAMPO} w-full pl-9 pr-3 text-base sm:text-sm font-medium placeholder:font-normal placeholder:text-slate-400`}
+            />
+          </div>
+          <Button
+            variant="outline"
+            onClick={() => {
+              if (navegando) {
+                fecharPainel();
+              } else {
+                setNavegando(true);
+                setAberto(null);
+              }
+            }}
+            title={navegando ? "Fechar a lista" : "Ver todos os materiais"}
+            aria-label={navegando ? "Fechar a lista" : "Ver todos os materiais"}
+            className={navegando ? BOTAO_ICONE_LIGADO : BOTAO_ICONE}
+          >
+            <List className="w-4 h-4" />
+          </Button>
+        </div>
+
+        {painelAberto && (
+          <div
+            ref={painelRef}
+            style={{ maxHeight: alturaPainel }}
+            className={`mt-2 ${LISTA} overflow-y-auto overscroll-contain`}
+          >
+            <div className="sticky top-0 z-10 flex items-center justify-between gap-2 bg-slate-50 px-3 py-1.5 text-[10px] font-black uppercase tracking-wider text-slate-500">
+              <span>
+                {resultados.length} {resultados.length === 1 ? "material" : "materiais"}
+              </span>
+              <button
+                type="button"
+                onClick={fecharPainel}
+                className="inline-flex items-center gap-1 h-7 px-2 -mr-2 rounded-md hover:bg-slate-200 hover:text-slate-700"
+              >
+                <X className="h-3.5 w-3.5" /> Fechar
+              </button>
+            </div>
+
+            {resultados.length === 0 && (
+              <p className="px-3 py-6 text-center text-sm font-medium text-slate-600">
+                Nenhum material com “{busca.trim()}”.
+              </p>
+            )}
+
+            {resultados.map((item) => {
+              const unidades = unidadesDoItem(item);
+              const ja = jaNoPedido(selecionados, item.id);
+              const estaAberto = aberto === item.id;
+              return (
+                <div key={item.id} className={estaAberto ? "bg-teal-50/60" : ""}>
+                  <button
+                    type="button"
+                    onClick={() => abrirItem(item)}
+                    aria-expanded={estaAberto}
+                    className="w-full min-h-12 flex items-center gap-3 px-3 py-2 text-left hover:bg-slate-50"
+                  >
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-sm font-bold text-slate-800 [overflow-wrap:anywhere]">{item.nome}</span>
+                      <span className="block text-[11px] font-semibold text-slate-500">{unidades.join(" · ")}</span>
+                    </span>
+                    {ja && (
+                      <span className="shrink-0 rounded-full border border-teal-200 bg-teal-50 px-2 py-0.5 text-[11px] font-bold text-teal-700 whitespace-nowrap">
+                        {ja}
+                      </span>
+                    )}
+                    {!estaAberto && <Plus className="h-4 w-4 shrink-0 text-slate-400" />}
+                  </button>
+
+                  {estaAberto && (
+                    <div className="px-3 pb-3 space-y-2">
+                      {unidades.length > 1 && (
+                        <div role="radiogroup" aria-label="Unidade" className="flex flex-wrap gap-1 p-1 bg-slate-100 rounded-lg border border-slate-200">
+                          {unidades.map((u) => (
+                            <button
+                              key={u}
+                              type="button"
+                              role="radio"
+                              aria-checked={unidadeAberta === u}
+                              onClick={() => setUnidadeAberta(u)}
+                              title={u}
+                              className={`${ABA} h-9 ${unidadeAberta === u ? ABA_ATIVA : ABA_INATIVA}`}
+                            >
+                              {rotuloUnidade(u)}
+                            </button>
+                          ))}
                         </div>
-                      </DialogContent>
-                    </Dialog>
-                  </div>
-                  {/* Lista no fluxo normal da tela, e não flutuando: o cartão
-                      corta o que passa da borda dele, e o último resultado
-                      ficava pela metade. Assim ela empurra o resto para baixo. */}
-                  {(buscaItem.length > 0) && (
-                    <div className="w-full border border-teal-200 shadow-lg shadow-teal-900/10 rounded-lg max-h-72 overflow-y-auto overscroll-contain bg-white divide-y divide-slate-100 ring-1 ring-slate-900/5">
-                      {itensFiltrados.map((i) => (
-                        <div
-                          key={i.id}
-                          onClick={() => escolherItem(i)}
-                          className="p-3 cursor-pointer hover:bg-teal-50/80 transition-colors"
+                      )}
+                      <div className="flex gap-2">
+                        <Contador
+                          valor={qtdAberta}
+                          aoMudar={setQtdAberta}
+                          rotulo={`Quantidade de ${item.nome}`}
+                          inputRef={qtdRef}
+                          aoConfirmar={adicionarAberto}
+                        />
+                        <Button
+                          onClick={adicionarAberto}
+                          disabled={!qtdAberta || !unidadeAberta}
+                          className={`${BOTAO_PRIMARIO} flex-1 min-w-0`}
                         >
-                          <p className="font-bold text-slate-800">
-                            {i.nome}
-                          </p>
-                          <p className="text-[11px] font-semibold tracking-wider text-slate-700 uppercase mt-0.5">
-                            {unidadesDoItem(i).join(" · ")}
-                          </p>
-                        </div>
-                      ))}
-                      {itensFiltrados.length === 0 && (
-                        <div className="p-4 text-center text-slate-700 text-sm font-medium bg-slate-50">
-                          Nenhum material encontrado.
-                        </div>
+                          <Plus className="h-4 w-4" />
+                          {unidadeAberta ? `Adicionar ${unidadeAberta}` : "Adicionar"}
+                        </Button>
+                      </div>
+                      {!unidadeAberta && (
+                        <p className="text-xs font-semibold text-amber-800">Escolha a unidade.</p>
                       )}
                     </div>
                   )}
                 </div>
-              ) : (
-                <div className="flex justify-between items-center p-3 bg-teal-50 border border-teal-200 rounded-md">
-                  <div className="break-words whitespace-normal">
-                    <p className="font-bold text-teal-900 break-words whitespace-normal">
-                      {itemSelecionado?.nome}
-                    </p>
-                    <p className="text-xs text-teal-700">
-                      Pode ser pedido em: {unidadesDoSelecionado.join(", ")}
-                    </p>
-                  </div>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => setItemAtual("")}
-                    className="text-teal-700 hover:text-teal-900 hover:bg-teal-100 h-8 font-medium shrink-0"
-                  >
-                    Trocar
-                  </Button>
-                </div>
-              )}
-            </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
 
-            <div className="flex flex-col sm:flex-row gap-3 pt-2 sm:items-end">
-              <div className="w-full sm:w-auto shrink-0">
-                <Label className="text-sm font-bold text-slate-700 mb-1 block">
-                  Quantidade
-                </Label>
-                <QuantitySelector
-                  value={qntAtual}
-                  onChange={(val) => setQntAtual(val)}
-                  min={0}
-                  step="any"
-                />
-              </div>
-
-              {/* Unidade obrigatória e só as cadastradas para o material.
-                  Material com uma unidade só já vem escolhido. Largura para o
-                  nome mais comprido ("CART — Cartela"): com 144px ele cortava. */}
-              <div className="w-full sm:w-48 shrink-0">
-                <Label className="text-sm font-bold text-slate-700 mb-1 block">
-                  Unidade <span className="text-red-600">*</span>
-                </Label>
-                <select
-                  value={unidadeAtual}
-                  onChange={(e) => setUnidadeAtual(e.target.value)}
-                  disabled={!itemAtual}
-                  aria-label="Unidade de medida do pedido"
-                  className={`w-full h-14 bg-white border rounded-xl px-3 text-base font-bold shadow-md focus:outline-none focus:ring-2 focus:ring-teal-500 disabled:bg-slate-50 disabled:text-slate-400 ${
-                    itemAtual && !unidadeAtual ? "border-amber-400 text-slate-500" : "border-slate-300 text-slate-700"
-                  }`}
-                >
-                  <option value="" disabled>
-                    {itemAtual ? "Escolha..." : "—"}
-                  </option>
-                  {unidadesDoSelecionado.map((u) => (
-                    <option key={u} value={u}>{u} — {rotuloUnidade(u)}</option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="flex-1 w-full">
-                <Button
-                  type="button"
-                  onClick={handleAddItem}
-                  disabled={!itemAtual || !qntAtual || !unidadeAtual}
-                  className="w-full h-14 bg-teal-600 hover:bg-teal-700 text-white font-bold disabled:opacity-50"
-                >
-                  <Plus className="h-5 w-5 mr-1" /> Adicionar ao Pedido
-                </Button>
-              </div>
-            </div>
-
-            {itemAtual && !unidadeAtual && (
-              <p className="text-xs font-semibold text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-                Escolha a unidade antes de adicionar: {unidadesDoSelecionado.join(", ")}.
-              </p>
-            )}
-          </CardContent>
-        </Card>
-
-        {selecionados.length > 0 && (
-          <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-300">
-            <h3 className="font-bold text-teal-900 text-lg border-b pb-2">
-              Itens no Pedido ({selecionados.length})
-            </h3>
-            <div className="space-y-3">
-              {selecionados.map((s, idx) => (
+      {/* Enquanto busca, só os resultados: o pedido volta ao fechar. O espaço
+          embaixo deixa a busca subir até o alto mesmo com o pedido vazio. */}
+      {painelAberto ? (
+        <div className="h-[70vh]" aria-hidden />
+      ) : total === 0 ? (
+        <div className="text-center py-10 px-4 bg-slate-50 rounded-xl border border-dashed border-slate-200/80 shadow-md shadow-slate-200/50">
+          <p className="text-slate-700 font-medium">Nenhum item no pedido.</p>
+        </div>
+      ) : (
+        <section className="space-y-2">
+          <h2 className="flex items-baseline gap-1.5 px-1 text-xs font-black uppercase tracking-wider text-slate-600">
+            Itens do pedido <span className="font-semibold text-slate-400">· {total}</span>
+          </h2>
+          <div className={LISTA}>
+            {selecionados.map((s, idx) => {
+              const nome = formatItemName(s.item?.nome);
+              return (
                 <div
                   key={`${s.item_id}-${s.unidade}-${idx}`}
-                  className="p-4 bg-white border border-slate-200/80 shadow-md shadow-slate-200/50 rounded-xl"
+                  ref={(el) => { linhasRef.current[idx] = el; }}
+                  className={`flex flex-wrap items-center gap-x-3 gap-y-2 px-3 py-2.5 transition-colors duration-700 ${
+                    destaque === idx ? "bg-teal-50" : ""
+                  }`}
                 >
-                  <div className="flex items-start justify-between gap-2">
-                    <p className="font-bold text-slate-800 break-words min-w-0 flex-1">
-                      {formatItemName(s.item?.nome)}
-                    </p>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="text-red-500 hover:bg-red-50 hover:text-red-700 rounded-full shrink-0 h-9 w-9"
-                      onClick={() => handleRemoverItem(idx)}
-                      title="Remover item do pedido"
-                    >
-                      <Trash2 className="h-5 w-5" />
-                    </Button>
+                  <div className="min-w-0 flex-1 basis-48">
+                    <p className="text-sm font-bold text-slate-800 [overflow-wrap:anywhere]">{nome}</p>
+                    {s.quantidade <= 0 && (
+                      <p className="text-xs font-bold text-red-600">Quantidade zerada</p>
+                    )}
                   </div>
-
-                  {/* Quantidade editável na própria linha: antes era preciso
-                      remover o item e adicionar de novo só para trocar o número. */}
-                  <div className="flex items-center gap-2 mt-3">
-                    <div className="flex items-center h-11 border border-slate-300 rounded-lg overflow-hidden bg-white shrink-0">
-                      <button
-                        type="button"
-                        onClick={() => alterarQuantidade(idx, s.quantidade - 1)}
-                        disabled={s.quantidade <= 0}
-                        aria-label="Diminuir quantidade"
-                        className="h-full w-10 flex items-center justify-center text-slate-600 hover:bg-slate-100 disabled:opacity-40 disabled:hover:bg-transparent"
-                      >
-                        <Minus className="h-4 w-4" />
-                      </button>
-                      <input
-                        type="number"
-                        step="any"
-                        min={0}
-                        value={s.quantidade}
-                        onChange={(e) =>
-                          alterarQuantidade(idx, e.target.value === "" ? 0 : Number(e.target.value))
-                        }
-                        aria-label={`Quantidade de ${formatItemName(s.item?.nome)}`}
-                        className="h-full w-16 text-center text-base font-bold text-slate-800 border-x border-slate-200 focus:outline-none focus:bg-teal-50"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => alterarQuantidade(idx, s.quantidade + 1)}
-                        aria-label="Aumentar quantidade"
-                        className="h-full w-10 flex items-center justify-center text-slate-600 hover:bg-slate-100"
-                      >
-                        <Plus className="h-4 w-4" />
-                      </button>
-                    </div>
-
+                  <div className="flex items-center gap-2 ml-auto">
+                    <Contador
+                      valor={s.quantidade}
+                      aoMudar={(v) => alterarQuantidade(idx, v === "" ? 0 : v)}
+                      rotulo={`Quantidade de ${nome}`}
+                    />
                     <select
                       value={s.unidade}
                       onChange={(e) => alterarUnidade(idx, e.target.value)}
-                      aria-label={`Unidade de ${formatItemName(s.item?.nome)}`}
-                      className="h-11 w-20 shrink-0 rounded-lg border border-slate-300 bg-white px-2 text-sm font-bold text-slate-700 focus:outline-none focus:ring-2 focus:ring-teal-500"
+                      aria-label={`Unidade de ${nome}`}
+                      className={`${SELETOR} w-[4.5rem] px-2`}
                     >
                       {/* Cadastro atual, não a cópia guardada no rascunho: um
                           rascunho antigo não conhece as unidades novas do item. */}
@@ -646,29 +728,40 @@ export default function NovaRequisicao() {
                         <option key={u} value={u}>{u}</option>
                       ))}
                     </select>
-
-                    {s.quantidade <= 0 && (
-                      <span className="text-xs font-bold text-red-600 min-w-0">
-                        Quantidade zerada
-                      </span>
-                    )}
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => handleRemoverItem(idx)}
+                      aria-label={`Remover ${nome}`}
+                      title="Remover do pedido"
+                      className="h-11 w-11 shrink-0 text-slate-400 hover:text-red-600 hover:bg-red-50"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
                   </div>
                 </div>
-              ))}
-            </div>
-
-            {/* A observação subiu para o topo do formulário. */}
-
-            <Button
-              className="w-full h-14 bg-teal-900 hover:bg-teal-950 active:scale-[0.98] transition-all text-white font-bold text-lg rounded-xl shadow-lg mt-6"
-              onClick={handleSubmit}
-              disabled={loading}
-            >
-              {loading ? (isEditMode ? "Salvando..." : "Processando envio...") : (isEditMode ? "Salvar Alterações" : "Enviar Requisição")}
-            </Button>
+              );
+            })}
           </div>
-        )}
-      </div>
+        </section>
+      )}
+
+      {/* Enviar: sempre à mão, preso no pé da tela. Some enquanto busca, para
+          não ficar flutuando em cima do teclado. */}
+      {total > 0 && !painelAberto && (
+        <div className="sticky bottom-3 z-20 flex items-center gap-3 rounded-xl border border-slate-200 bg-white p-1.5 pl-4 shadow-md">
+          <p className="flex-1 min-w-0 text-sm font-bold text-slate-700 whitespace-nowrap">
+            {total} {total === 1 ? "item" : "itens"}
+            <span className="font-medium text-slate-500 max-[359px]:hidden"> no pedido</span>
+          </p>
+          <Button onClick={handleSubmit} disabled={loading} className={`${BOTAO_PRIMARIO} shadow-none`}>
+            <Send className="h-4 w-4" />
+            {loading
+              ? (isEditMode ? "Salvando..." : "Enviando...")
+              : (isEditMode ? "Salvar alterações" : "Enviar requisição")}
+          </Button>
+        </div>
+      )}
     </div>
   );
 }

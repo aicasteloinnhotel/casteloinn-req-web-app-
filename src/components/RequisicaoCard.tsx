@@ -10,6 +10,7 @@ import { StatusBadge } from "@/components/StatusBadge";
 import { contemTexto, foiEntregue, formatItemName, precisaLancar, unidadeDoItem } from "@/lib/utils";
 import { formatarQtd, quantidadeDevolvida, quantidadeQueSaiu, unidadeEntregue } from "@/lib/unidades";
 import { useNavigate } from "react-router-dom";
+import { textoDaObservacao } from "@/lib/observacao";
 
 /**
  * Colunas da tabela do computador: Nº, Setor, Solicitante, Itens, Pedida,
@@ -52,7 +53,7 @@ export const RequisicaoCard = React.memo(({ req, buscaItem }: { req: Requisicao;
   const { user } = useAuth();
 
   // Observação visível já na lista: dá para ver o aviso antes de abrir.
-  const obsNaLista = (req.observacao || "").trim();
+  const obsNaLista = textoDaObservacao(req.observacao);
   // A trava expira: sem checar o tempo, uma separação abandonada deixava o
   // selo "Em Atendimento" na lista para sempre.
   const isLockedByOther =

@@ -30,7 +30,7 @@ import { calcularSaidas } from "@/lib/saidas";
 import { CampoBusca } from "@/components/CampoBusca";
 import {
   ABA, ABA_ATIVA, ABA_INATIVA, ABAS, BOTAO_ICONE, BOTAO_PRIMARIO, BOTAO_SECUNDARIO,
-  CAMPO, SELETOR, SUBTITULO, TITULO,
+  CAMPO, SELETOR, TITULO,
 } from "@/lib/estilos";
 import { endOfDay, format, startOfDay } from "date-fns";
 
@@ -301,7 +301,6 @@ export default function Itens() {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className={TITULO}>Controle de Itens</h1>
-          <p className={SUBTITULO}>Acompanhe a saída de materiais e gerencie o catálogo.</p>
         </div>
 
         <div className={`${ABAS} w-full sm:w-80 shrink-0`} role="tablist">
@@ -613,12 +612,6 @@ export default function Itens() {
               <legend className="text-sm font-medium leading-none">
                 Unidades em que pode ser pedido <span className="text-red-600">*</span>
               </legend>
-              <p className="text-xs text-slate-500">
-                Toque para marcar uma ou mais.
-                {form.unidades.length > 0 && (
-                  <> Marcadas: <strong className="text-slate-700">{form.unidades.join(", ")}</strong></>
-                )}
-              </p>
               <div className="grid grid-cols-3 gap-1.5 sm:grid-cols-4">
                 {opcoesUnidade.map((u) => {
                   const marcada = form.unidades.includes(u.valor);

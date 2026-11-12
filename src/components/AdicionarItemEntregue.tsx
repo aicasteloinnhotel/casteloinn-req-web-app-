@@ -138,7 +138,7 @@ export function AdicionarItemEntregue({
             <PackagePlus className="h-5 w-5 shrink-0" /> Adicionar item entregue
           </DialogTitle>
           <DialogDescription>
-            REQ #{req.codigo_requisicao}, já entregue. Fica registrado no histórico.
+            REQ #{req.codigo_requisicao}
           </DialogDescription>
         </DialogHeader>
 

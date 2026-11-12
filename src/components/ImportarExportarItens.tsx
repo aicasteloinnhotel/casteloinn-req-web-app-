@@ -252,7 +252,7 @@ export function ImportarExportarItens({
           <DialogTitle className="flex items-center gap-2 text-teal-900 font-bold">
             <FileSpreadsheet className="h-5 w-5 shrink-0" /> Importar / Exportar itens
           </DialogTitle>
-          <DialogDescription>Planilha do catálogo: Nome, Medidas e Situação.</DialogDescription>
+          <DialogDescription className="sr-only">Planilha do catálogo de itens.</DialogDescription>
         </DialogHeader>
 
         <div className="p-4 overflow-y-auto flex-1 space-y-4">

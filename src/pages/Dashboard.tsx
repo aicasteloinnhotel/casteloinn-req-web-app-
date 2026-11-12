@@ -70,7 +70,6 @@ export default function Dashboard() {
                   <h2 className="text-lg font-bold text-slate-800">
                     Nova Requisição
                   </h2>
-                  <p className="text-sm text-slate-700">Solicitar materiais</p>
                 </div>
               </div>
               <ChevronRight className="text-slate-300 group-hover:text-teal-600" />
@@ -89,7 +88,6 @@ export default function Dashboard() {
                   <h2 className="text-lg font-bold text-slate-800">
                     Minhas Requisições
                   </h2>
-                  <p className="text-sm text-slate-700">Acompanhar status</p>
                 </div>
               </div>
               <ChevronRight className="text-slate-300 group-hover:text-teal-600" />

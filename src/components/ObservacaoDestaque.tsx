@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { MessageSquareWarning, PenLine, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { textoDaObservacao } from "@/lib/observacao";
 
 /**
  * Observação da requisição, em destaque e no topo. Fica acima de tudo porque
@@ -23,7 +24,9 @@ export function ObservacaoDestaque({
   /** Quem pode editar recebe o lápis. Rejeitar a promessa mantém o texto aberto. */
   aoSalvar?: (texto: string) => Promise<void>;
 }) {
-  const texto = (observacao || "").trim();
+  // Já na forma curta: a complementar aparece como "Complementar da #368".
+  // Editar e salvar grava a forma curta, o que não muda nada para ninguém.
+  const texto = textoDaObservacao(observacao);
   const [editando, setEditando] = useState(false);
   const [rascunho, setRascunho] = useState(texto);
   const [salvando, setSalvando] = useState(false);

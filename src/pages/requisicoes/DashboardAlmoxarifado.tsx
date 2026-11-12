@@ -28,6 +28,7 @@ import {
 } from "recharts";
 import { descreverQuantidades, foiEntregue, formatItemName, precisaLancar } from "@/lib/utils";
 import { imprimirPdf } from "@/lib/imprimir";
+import { textoDaObservacao } from "@/lib/observacao";
 import { BotaoSuspenderRequisicoes } from "@/components/PausaInventario";
 import { useBloqueio } from "@/contexts/BloqueioContext";
 import { useAuth } from "@/contexts/AuthContext";
@@ -458,10 +459,10 @@ export default function DashboardAlmoxarifado({
               {r.usuario?.nome || "---"}
               {qtdItens > 0 && ` · ${qtdItens} ${qtdItens === 1 ? "item" : "itens"}`}
             </span>
-            {r.observacao?.trim() && (
-              <span className="mt-1 flex items-start gap-1 text-xs font-semibold text-amber-800" title={r.observacao.trim()}>
+            {textoDaObservacao(r.observacao) && (
+              <span className="mt-1 flex items-start gap-1 text-xs font-semibold text-amber-800" title={textoDaObservacao(r.observacao)}>
                 <MessageSquareWarning className="h-3.5 w-3.5 mt-px shrink-0" />
-                <span className="min-w-0 line-clamp-2 [overflow-wrap:anywhere]">{r.observacao.trim()}</span>
+                <span className="min-w-0 line-clamp-2 [overflow-wrap:anywhere]">{textoDaObservacao(r.observacao)}</span>
               </span>
             )}
           </span>
@@ -618,7 +619,7 @@ export default function DashboardAlmoxarifado({
             <div className="min-w-0">
               <h2 className="text-base font-bold text-slate-800">Fila de atendimento</h2>
               <p className="text-xs font-semibold text-slate-500">
-                {pendentes.length} {pendentes.length === 1 ? "pendente" : "pendentes"} · {separando.length} em separação · mais antiga primeiro
+                {pendentes.length} {pendentes.length === 1 ? "pendente" : "pendentes"} · {separando.length} em separação
               </p>
             </div>
             <button
@@ -635,7 +636,6 @@ export default function DashboardAlmoxarifado({
                 <Inbox className="h-6 w-6" />
               </span>
               <p className="text-sm font-semibold text-slate-700">Nenhum pedido esperando</p>
-              <p className="text-xs text-slate-500">Quando chegar requisição nova, ela aparece aqui.</p>
             </div>
           ) : (
             <ul className="divide-y divide-slate-100 lg:flex-1 lg:min-h-0 lg:overflow-y-auto -mx-2 px-2">
@@ -652,12 +652,9 @@ export default function DashboardAlmoxarifado({
               <span className="h-8 w-8 shrink-0 rounded-lg bg-sky-50 text-sky-700 flex items-center justify-center">
                 <PackageSearch className="h-4 w-4" />
               </span>
-              <div className="min-w-0">
-                <h2 className="text-sm font-bold text-slate-800 leading-tight">
-                  Aguardando material <span className="font-medium text-slate-500">· {aguardando.length}</span>
-                </h2>
-                <p className="text-xs text-slate-500 leading-tight">esperando a compra chegar</p>
-              </div>
+              <h2 className="min-w-0 text-sm font-bold text-slate-800 leading-tight">
+                Aguardando material <span className="font-medium text-slate-500">· {aguardando.length}</span>
+              </h2>
             </div>
             {aguardando.length > 0 && (
               <button

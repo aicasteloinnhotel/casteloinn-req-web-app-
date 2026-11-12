@@ -29,6 +29,7 @@ import {
 import { ObservacaoDestaque } from "@/components/ObservacaoDestaque";
 import { playSound } from "@/lib/sounds";
 import { imprimirPdf } from "@/lib/imprimir";
+import { textoDaObservacao } from "@/lib/observacao";
 import { Requisicao, Historico, Devolucao } from "@/types";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
@@ -401,7 +402,7 @@ export default function DetalheRequisicao() {
 
     // Observação ANTES dos itens, numa caixa: é o aviso do setor, e no fim da
     // folha ninguém lia.
-    const observacao = (req.observacao || "").trim();
+    const observacao = textoDaObservacao(req.observacao);
     doc.setFont("helvetica", "normal");
     doc.setFontSize(9);
     const linhasObs: string[] = observacao ? doc.splitTextToSize(observacao, 174) : [];
@@ -1312,14 +1313,7 @@ export default function DetalheRequisicao() {
               // Quadro neutro: cada botão leva a sua cor (roxo = devolução, verde =
               // adicionar). Todo roxo, o "Adicionar item" parecia devolução.
               <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 flex flex-col gap-3 print:hidden">
-                <div className="min-w-0">
-                  <p className="text-sm font-bold text-slate-800">Mudou algo depois da entrega?</p>
-                  <p className="text-xs text-slate-600 mt-0.5">
-                    Antes de lançar no TOTVS: registre o que voltou ou adicione o que foi entregue a
-                    mais. Para trocar um item, devolva o errado e adicione o certo. Tudo fica no
-                    histórico.
-                  </p>
-                </div>
+                <p className="text-sm font-bold text-slate-800">Mudou algo depois da entrega?</p>
                 <div className="flex flex-col sm:flex-row gap-2">
                   {podeDevolver && (
                     <Button
@@ -1499,7 +1493,7 @@ export default function DetalheRequisicao() {
               <PackageMinus className="h-5 w-5 shrink-0" /> Registrar devolução
             </DialogTitle>
             <DialogDescription>
-              REQ #{req.codigo_requisicao} — o que voltou do setor para o almoxarifado.
+              REQ #{req.codigo_requisicao}
             </DialogDescription>
           </DialogHeader>
 
@@ -1650,8 +1644,7 @@ export default function DetalheRequisicao() {
           <DialogHeader>
             <DialogTitle>Cancelar a requisição #{req.codigo_requisicao}?</DialogTitle>
             <DialogDescription>
-              O pedido sai da fila do almoxarifado e não pode ser reaberto.
-              Se ainda precisar dos materiais, será necessário criar uma nova requisição.
+              Não pode ser reaberta depois.
             </DialogDescription>
           </DialogHeader>
           <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-2 pt-2">
@@ -1703,10 +1696,8 @@ export default function DetalheRequisicao() {
               <ClipboardList className="h-5 w-5 shrink-0" />
               Lançar no TOTVS — REQ #{req.codigo_requisicao}
             </DialogTitle>
-            <DialogDescription>
-              {req.lancado
-                ? "Esta requisição já está marcada como lançada."
-                : "Confira os dados abaixo, lance no TOTVS e marque como lançada."}
+            <DialogDescription className={req.lancado ? undefined : "sr-only"}>
+              {req.lancado ? "Já marcada como lançada." : "Lançar no TOTVS"}
             </DialogDescription>
             {/* "Onde estou": no cabeçalho, que não rola — dentro da lista a barra
                 sumia conforme a lista descia. Diz também qual é o próximo item,
@@ -1851,8 +1842,7 @@ export default function DetalheRequisicao() {
 
             <p className="text-xs text-slate-500">
               Solicitante: <span className="font-semibold text-slate-700">{req.usuario?.nome || "---"}</span>
-              {" · "}Quantidades mostradas são as <strong>entregues</strong>
-              {linhasComDevolucao > 0 ? <>, já <strong>descontadas as devoluções</strong>.</> : "."}
+              {linhasComDevolucao > 0 && <> · já sem as <strong>devoluções</strong></>}
               {linhasNaoEntregues > 0 && (
                 <>
                   {" "}
@@ -1962,10 +1952,8 @@ export default function DetalheRequisicao() {
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>{req.lancado ? "Lançada no TOTVS" : "Imprimir comprovante"}</DialogTitle>
-            <DialogDescription>
-              {req.lancado
-                ? "Agora imprima ou exporte o comprovante. Ele sai com o nome de quem lançou e de quem imprimiu."
-                : "Escolha como deseja documentar a requisição."}
+            <DialogDescription className={req.lancado ? undefined : "sr-only"}>
+              {req.lancado ? "Agora imprima ou exporte o comprovante." : "Imprimir ou exportar"}
             </DialogDescription>
           </DialogHeader>
           <div className="flex flex-col gap-3 py-4">

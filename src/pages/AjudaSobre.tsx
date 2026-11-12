@@ -36,7 +36,7 @@ import { StatusBadge } from "@/components/StatusBadge";
 import { HistoricoDeVersoes } from "@/components/HistoricoDeVersoes";
 import { toast } from "@/lib/toast";
 import { estadoDosAvisos, pedirPermissaoDeAvisos, type EstadoAviso } from "@/lib/notificacoes";
-import { ABA, ABA_ATIVA, ABA_INATIVA, ABAS, SUBTITULO, TITULO } from "@/lib/estilos";
+import { ABA, ABA_ATIVA, ABA_INATIVA, ABAS, TITULO } from "@/lib/estilos";
 import {
   APP,
   DATA_DA_PUBLICACAO,
@@ -204,7 +204,6 @@ export default function AjudaSobre() {
       <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
         <div>
           <h1 className={TITULO}>Ajuda e Sobre</h1>
-          <p className={SUBTITULO}>Como usar o sistema, contato do almoxarifado e dados do app.</p>
         </div>
         <div className={`${ABAS} w-full shrink-0 sm:w-64`} role="tablist">
           <button
@@ -253,23 +252,25 @@ export default function AjudaSobre() {
                   )}
                 </li>
                 <li>
-                  Tem algo importante (prazo, evento, cuidado com algum item)? Escreva na caixa
-                  amarela de <strong>Observação</strong>, logo no começo. Ela aparece em destaque,
+                  Tem algo importante (prazo, evento, cuidado com algum item)? Toque em{" "}
+                  <strong>Adicionar observação</strong>, logo no começo. Ela aparece em destaque,
                   no topo, para quem separa.
                 </li>
                 <li>
-                  Digite o nome do material — não precisa de acento — ou toque no ícone de lista
-                  para ver todos.
+                  Digite o nome do material na busca — não precisa de acento — ou toque no ícone de
+                  lista para ver todos.
                 </li>
                 <li>
-                  Escolha a <strong>quantidade</strong> e a <strong>unidade</strong> (obrigatória).
-                  Só aparecem as unidades cadastradas para aquele material — por exemplo, carne em
-                  UN ou KG.
+                  Toque no material: ali mesmo escolha a <strong>unidade</strong> (obrigatória) e a{" "}
+                  <strong>quantidade</strong>, e toque em <strong>Adicionar</strong>. Só aparecem as
+                  unidades cadastradas para aquele material — por exemplo, carne em Unidade ou Quilo.
                 </li>
-                <li>Toque em <strong>Adicionar ao Pedido</strong>. Repita para cada material.</li>
                 <li>
-                  Confira a lista (dá para mudar a quantidade ali mesmo) e toque em{" "}
-                  <strong>Enviar Requisição</strong>.
+                  Repita para cada material. O que já está no pedido aparece marcado na busca.
+                </li>
+                <li>
+                  Confira a lista (dá para mudar a quantidade e a unidade ali mesmo) e toque em{" "}
+                  <strong>Enviar requisição</strong>, no pé da tela.
                 </li>
               </Passos>
               <p>

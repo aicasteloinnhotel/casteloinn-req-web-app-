@@ -116,8 +116,7 @@ export function BotaoSuspenderRequisicoes({
           <DialogHeader>
             <DialogTitle>Suspender novas requisições?</DialogTitle>
             <DialogDescription>
-              Ninguém consegue criar requisição nova até você liberar. Pedidos que já existem
-              continuam: dá para separar, entregar e lançar normalmente.
+              Ninguém cria requisição nova até você liberar. O resto continua normal.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-2">

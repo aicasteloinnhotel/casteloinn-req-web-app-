@@ -21,6 +21,9 @@ export const BOTAO_ICONE =
 /** Ação principal da tela (Nova, Novo item, Adicionar). */
 export const BOTAO_PRIMARIO = "h-11 px-4 bg-teal-600 hover:bg-teal-700 text-white font-bold";
 
+/** O mesmo botão de ícone quando está ligado (funil aberto, lista aberta). */
+export const BOTAO_ICONE_LIGADO = "h-11 w-11 p-0 shrink-0 bg-teal-50 text-teal-700 border-teal-200";
+
 /** Botão secundário com texto (Importar CSV). */
 export const BOTAO_SECUNDARIO =
   "h-11 px-3 bg-white text-slate-700 font-bold border-slate-200 hover:bg-slate-50";
@@ -31,6 +34,5 @@ export const ABA = "flex-1 flex items-center justify-center gap-2 px-3 rounded-m
 export const ABA_ATIVA = "bg-white text-slate-800 shadow-sm";
 export const ABA_INATIVA = "text-slate-600 hover:text-slate-800";
 
-/** Cabeçalho de toda tela: título + subtítulo. */
+/** Título de toda tela. Sem subtítulo: o nome da tela já diz o que ela é. */
 export const TITULO = "text-2xl sm:text-3xl font-bold tracking-tight text-teal-900";
-export const SUBTITULO = "text-slate-700 text-sm";

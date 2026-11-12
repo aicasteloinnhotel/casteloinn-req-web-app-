@@ -31,7 +31,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { contemTexto, descreverQuantidades, formatItemName } from "@/lib/utils";
 import { imprimirPdf } from "@/lib/imprimir";
 import { CampoBusca } from "@/components/CampoBusca";
-import { BOTAO_ICONE, BOTAO_PRIMARIO, SUBTITULO, TITULO } from "@/lib/estilos";
+import { BOTAO_ICONE, BOTAO_PRIMARIO, TITULO } from "@/lib/estilos";
 import { 
   Search, 
   History, 
@@ -1015,7 +1015,6 @@ export default function ListaReposicao() {
         {/* CABEÇALHO */}
         <div>
           <h1 className={TITULO}>Lista de Reposição</h1>
-          <p className={SUBTITULO}>Marque os itens para copiar para a cotação ou mudar o estado de vários de uma vez.</p>
         </div>
 
         {/* BARRA DE AÇÕES — uma linha, no padrão das outras telas: a busca
@@ -1237,8 +1236,8 @@ export default function ListaReposicao() {
             <DialogTitle className="text-xl font-black text-slate-800 mb-1">
               Histórico de Baixas
             </DialogTitle>
-            <DialogDescription className="text-slate-600 text-sm">
-              Registro auditável dos itens que já foram resolvidos ou repostos no estoque.
+            <DialogDescription className="sr-only">
+              Itens já resolvidos ou repostos.
             </DialogDescription>
           </div>
 

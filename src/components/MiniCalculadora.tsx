@@ -281,10 +281,6 @@ export function MiniCalculadora() {
             </ul>
           </div>
         )}
-
-        <p className="text-[11px] leading-snug text-slate-500">
-          Dá para usar o teclado: números, + − × ÷, Enter = resultado, Esc zera. Ctrl+C copia o resultado.
-        </p>
       </div>
     </div>
   );
