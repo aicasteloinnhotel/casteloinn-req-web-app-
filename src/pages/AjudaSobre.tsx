@@ -296,10 +296,13 @@ export default function AjudaSobre() {
                 </li>
               </Passos>
               <p>
-                Procurando uma requisição? No funil (<strong>filtros</strong>) dá para buscar pelo{" "}
-                <strong>número</strong>, por item, departamento e data. Os filtros ligados aparecem
-                acima da lista; <strong>Limpar filtros</strong> tira todos de uma vez. O botão de
-                seta circular atualiza a lista na hora.
+                A lista abre em <strong>Em aberto</strong> (no almoxarifado, <strong>A fazer</strong>);
+                as outras abas mostram as que aguardam, as concluídas e todas. Procurando uma
+                requisição? Digite na <strong>busca</strong> o número, um item, o setor ou o nome de
+                quem pediu: ela procura em todas as abas. No funil (<strong>filtros</strong>) ficam o
+                período e o status; os filtros ligados aparecem acima da lista, e{" "}
+                <strong>Limpar filtros</strong> tira todos de uma vez. O botão de seta circular
+                atualiza a lista na hora.
               </p>
               <p>O significado de cada cor está em “O que significa cada status”, mais abaixo.</p>
             </Topico>
@@ -470,7 +473,7 @@ export default function AjudaSobre() {
                     </li>
                   </Passos>
                   <p>
-                    O filtro <strong>A lançar</strong>, na lista de Requisições, mostra o que ainda
+                    A aba <strong>A lançar</strong>, na lista de Requisições, mostra o que ainda
                     falta. Marcou por engano? Abra de novo e toque em{" "}
                     <strong>Desfazer lançamento</strong>.
                   </p>

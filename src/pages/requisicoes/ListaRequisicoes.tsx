@@ -2,21 +2,51 @@ import React, { useState, useMemo, useEffect, useDeferredValue } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { format, startOfDay, endOfDay } from "date-fns";
-import { contemTexto, dataInputParaLocal, formatItemName, precisaLancar } from "@/lib/utils";
+import { dataInputParaLocal } from "@/lib/utils";
 import { lerFiltros, salvarFiltros } from "@/lib/filtrosRequisicoes";
 import { ORDEM_PADRAO, ORDENS, ehOrdem, ordenarEmGrupos, type OrdemRequisicoes } from "@/lib/ordemRequisicoes";
+import {
+  ABA_PADRAO, abaDoAtalho, abasPara, casaComBusca, ehAba, estaNaAba, numeroDaBusca, type AbaRequisicoes,
+} from "@/lib/abasRequisicoes";
+import { ABA_ATIVA, ABA_INATIVA, BOTAO_ICONE, BOTAO_PRIMARIO, CAMPO, SUBTITULO, TITULO } from "@/lib/estilos";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { Plus, RefreshCcw, Filter, FilterX, X, ArrowLeft, ArrowUpDown, Check, ClipboardList, ClipboardCheck } from "lucide-react";
+import { Plus, RefreshCcw, Filter, FilterX, X, ArrowLeft, ArrowUpDown, Check, Search } from "lucide-react";
 import { hasSupabaseKeys } from "@/lib/supabase";
 import { useRequisicoesSync } from "@/hooks/useRequisicoesSync";
-import { RequisicaoCard } from "@/components/RequisicaoCard";
+import { RequisicaoCard, CabecalhoDaTabela } from "@/components/RequisicaoCard";
 import { Input } from "@/components/ui/input";
+
+// Refinos do funil: valem dentro da aba (ou da busca).
+type FiltroStatus = "TODAS" | "PENDENTE" | "SEPARANDO" | "FINALIZADA" | "CANCELADA" | "AGUARDANDO" | "RUPTURAS";
+const STATUS_VALIDOS: FiltroStatus[] = ["TODAS", "PENDENTE", "SEPARANDO", "FINALIZADA", "CANCELADA", "AGUARDANDO", "RUPTURAS"];
+const OPCOES_DE_STATUS: { label: string; value: FiltroStatus }[] = [
+  { label: "Todos", value: "TODAS" },
+  { label: "Pendentes", value: "PENDENTE" },
+  { label: "Separando", value: "SEPARANDO" },
+  { label: "Aguardando", value: "AGUARDANDO" },
+  { label: "Finalizadas", value: "FINALIZADA" },
+  { label: "Rupturas", value: "RUPTURAS" },
+  { label: "Canceladas", value: "CANCELADA" },
+];
+type FiltroLancamento = "TODOS" | "A_LANCAR" | "LANCADAS";
+
+// A mesma aba do resto do app (ABA), mas no celular cada uma tem a largura do
+// nome e a linha quebra quando falta espaço: em colunas iguais, "Aguardando"
+// era cortado.
+const ABA_DA_FILA =
+  "flex flex-auto sm:flex-1 items-center justify-center gap-1.5 sm:gap-2 h-9 sm:h-auto px-2.5 sm:px-3 rounded-md text-[13px] sm:text-sm font-bold whitespace-nowrap transition-colors";
+
+// Funil ou ordem ligados: o mesmo botão de ícone, em verde-claro (como antes).
+const BOTAO_ICONE_LIGADO = "h-11 w-11 p-0 shrink-0 bg-teal-50 text-teal-700 border-teal-200";
+
+const ROTULO_DO_CAMPO ="text-[10px] font-bold text-slate-700 uppercase tracking-wider mb-1 block";
 
 export default function ListaRequisicoes() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
+  const ehAlmoxarifado = user?.perfil === "ALMOXARIFADO";
   // Filtros guardados neste menu: voltar de uma requisição ou dar F5 não os
   // perde. Somem ao ir para outro menu (ver filtrosRequisicoes.ts).
   const [salvos] = useState(() => lerFiltros(user?.id));
@@ -29,57 +59,40 @@ export default function ListaRequisicoes() {
     atualizarManualmente,
   } = useRequisicoesSync(user?.perfil === "SOLICITANTE" ? user.id : undefined);
 
-  // Filtros rápidos. O parâmetro ?filter= da URL antes só reconhecia
-  // "aguardando"; qualquer outro valor caía em TODAS silenciosamente, então os
-  // atalhos do dashboard não filtravam nada.
-  type FiltroRapido = "TODAS" | "PENDENTE" | "SEPARANDO" | "FINALIZADA" | "CANCELADA" | "AGUARDANDO" | "RUPTURAS";
-  const FILTROS_VALIDOS: FiltroRapido[] = ["TODAS", "PENDENTE", "SEPARANDO", "FINALIZADA", "CANCELADA", "AGUARDANDO", "RUPTURAS"];
+  // Aba: atalho do painel (?filter=aguardando, ?lancamento=a_lancar) vale
+  // mais que a guardada. "A lançar" só existe para o almoxarifado.
+  const abas = abasPara(ehAlmoxarifado);
+  const [aba, setAba] = useState<AbaRequisicoes>(() => {
+    const doAtalho = abaDoAtalho(searchParams.get("filter"), searchParams.get("lancamento"));
+    const escolhida = doAtalho ?? (ehAba(salvos.aba) ? salvos.aba : ABA_PADRAO);
+    return abas.some((a) => a.aba === escolhida) ? escolhida : ABA_PADRAO;
+  });
 
-  // Atalho do painel (?filter=aguardando) vale mais que o filtro guardado.
-  const filtroDaUrl = (searchParams.get("filter") || "").toUpperCase() as FiltroRapido;
-  const statusSalvo = (salvos.status || "") as FiltroRapido;
-  const initialFilter: FiltroRapido = FILTROS_VALIDOS.includes(filtroDaUrl)
-    ? filtroDaUrl
-    : FILTROS_VALIDOS.includes(statusSalvo) ? statusSalvo : "TODAS";
-  const [quickFilter, setQuickFilter] = useState<FiltroRapido>(initialFilter);
+  // Busca única: número, item, setor ou quem pediu. Procura em todas as abas.
+  // Adiada para a digitação não engasgar no celular com centenas de requisições.
+  const [busca, setBusca] = useState(salvos.busca || "");
+  const buscaAdiada = useDeferredValue(busca.trim());
+  const numeroBuscado = numeroDaBusca(buscaAdiada);
 
-  // Lançamento no TOTVS. "A lançar" só faz sentido para o que já foi entregue:
-  // uma requisição pendente também não está lançada, mas ainda não pode ser.
-  type FiltroLancamento = "TODOS" | "A_LANCAR" | "LANCADAS";
-  const ehAlmoxarifado = user?.perfil === "ALMOXARIFADO";
-  // Atalho do painel (?lancamento=a_lancar) também vale mais que o guardado.
-  const lancamentoDaUrl = (searchParams.get("lancamento") || "").toUpperCase();
-  const [filtroLancamento, setFiltroLancamento] = useState<FiltroLancamento>(() =>
-    !ehAlmoxarifado
-      ? "TODOS"
-      : lancamentoDaUrl === "A_LANCAR" || lancamentoDaUrl === "LANCADAS"
-        ? lancamentoDaUrl
-        : salvos.lancamento === "A_LANCAR" || salvos.lancamento === "LANCADAS"
-          ? salvos.lancamento
-          : "TODOS"
+  // Refinos do funil.
+  const [filtroStatus, setFiltroStatus] = useState<FiltroStatus>(() =>
+    STATUS_VALIDOS.includes(salvos.status as FiltroStatus) ? (salvos.status as FiltroStatus) : "TODAS"
   );
-
-  // Advanced filters
-  const [advDept, setAdvDept] = useState(salvos.departamento || "");
+  const [filtroLancamento, setFiltroLancamento] = useState<FiltroLancamento>(() =>
+    ehAlmoxarifado && (salvos.lancamento === "A_LANCAR" || salvos.lancamento === "LANCADAS")
+      ? salvos.lancamento
+      : "TODOS"
+  );
   const [advDateStart, setAdvDateStart] = useState(salvos.dataInicial || "");
   const [advDateEnd, setAdvDateEnd] = useState(salvos.dataFinal || "");
   // Painel aberto se ficou aberto, ou se há filtro nele: filtro escondido
   // aplicado confunde ("cadê as requisições?").
   const [showAdvanced, setShowAdvanced] = useState(
     !!salvos.painelAberto ||
-      !!(salvos.numero || salvos.item || salvos.departamento || salvos.dataInicial || salvos.dataFinal)
+      !!(salvos.dataInicial || salvos.dataFinal) ||
+      (!!salvos.status && salvos.status !== "TODAS") ||
+      (!!salvos.lancamento && salvos.lancamento !== "TODOS")
   );
-
-  // Busca por material: mostra as requisições que têm esse item, somada aos
-  // outros filtros. Adiada para a digitação não engasgar no celular com
-  // centenas de requisições na lista.
-  const [buscaItem, setBuscaItem] = useState(salvos.item || "");
-  const buscaItemAdiada = useDeferredValue(buscaItem.trim());
-
-  // Número da requisição: "72" ou "#72" acha só a #72 (exato: digitar 7 não
-  // traz a #17, a #70...).
-  const [buscaNumero, setBuscaNumero] = useState(salvos.numero || "");
-  const numeroBuscado = buscaNumero.replace(/\D/g, "");
 
   // Ordem da lista: só o almoxarifado escolhe (o solicitante vê só as dele,
   // e setor/solicitante não fazem sentido para ele). Guardada como os filtros.
@@ -91,26 +104,26 @@ export default function ListaRequisicoes() {
 
   useEffect(() => {
     salvarFiltros(user?.id, {
-      numero: buscaNumero,
-      item: buscaItem,
-      status: quickFilter,
+      aba,
+      busca,
+      status: filtroStatus,
       lancamento: filtroLancamento,
-      departamento: advDept,
       dataInicial: advDateStart,
       dataFinal: advDateEnd,
       painelAberto: showAdvanced,
       ordem,
     });
-  }, [user?.id, buscaNumero, buscaItem, quickFilter, filtroLancamento, advDept, advDateStart, advDateEnd, showAdvanced, ordem]);
+  }, [user?.id, aba, busca, filtroStatus, filtroLancamento, advDateStart, advDateEnd, showAdvanced, ordem]);
 
-  // O atalho do painel já virou filtro guardado: tira da URL, senão um F5
-  // depois de trocar o filtro voltaria para o do atalho.
+  // O atalho do painel já virou aba guardada: tira da URL, senão um F5
+  // depois de trocar de aba voltaria para a do atalho.
   useEffect(() => {
     if (searchParams.has("filter") || searchParams.has("lancamento")) setSearchParams({}, { replace: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const requisicoes = useMemo(() => {
+  // Tudo o que vale antes da aba e da busca: dono (solicitante) e o funil.
+  const filtradas = useMemo(() => {
     let result = reqs;
 
     // Filtrar estritamente pelo ID do usuário autenticado se for SOLICITANTE
@@ -118,25 +131,19 @@ export default function ListaRequisicoes() {
       result = result.filter(r => r.usuario_id === user.id);
     }
 
-    // Quick filter
-    if (quickFilter === "PENDENTE") result = result.filter(r => r.status === "PENDENTE");
-    if (quickFilter === "AGUARDANDO") result = result.filter(r => r.status === "AGUARDANDO");
-    if (quickFilter === "SEPARANDO") result = result.filter(r => r.status === "SEPARANDO");
-    if (quickFilter === "FINALIZADA") result = result.filter(r => ["FINALIZADA", "RUPTURA_PARCIAL", "RUPTURA_TOTAL"].includes(r.status));
-    if (quickFilter === "RUPTURAS") result = result.filter(r => ["RUPTURA_PARCIAL", "RUPTURA_TOTAL"].includes(r.status));
-    if (quickFilter === "CANCELADA") result = result.filter(r => r.status === "CANCELADA");
+    if (filtroStatus === "PENDENTE") result = result.filter(r => r.status === "PENDENTE");
+    if (filtroStatus === "AGUARDANDO") result = result.filter(r => r.status === "AGUARDANDO");
+    if (filtroStatus === "SEPARANDO") result = result.filter(r => r.status === "SEPARANDO");
+    if (filtroStatus === "FINALIZADA") result = result.filter(r => ["FINALIZADA", "RUPTURA_PARCIAL", "RUPTURA_TOTAL"].includes(r.status));
+    if (filtroStatus === "RUPTURAS") result = result.filter(r => ["RUPTURA_PARCIAL", "RUPTURA_TOTAL"].includes(r.status));
+    if (filtroStatus === "CANCELADA") result = result.filter(r => r.status === "CANCELADA");
 
-    // Lançamento no TOTVS
     if (filtroLancamento === "LANCADAS") {
       result = result.filter(r => r.lancado === true);
     } else if (filtroLancamento === "A_LANCAR") {
-      result = result.filter(r => !r.lancado && precisaLancar(r.status));
+      result = result.filter(r => estaNaAba(r, "A_LANCAR"));
     }
 
-    // Advanced filters
-    if (advDept.trim() !== "") {
-      result = result.filter(r => contemTexto(r.departamento, advDept));
-    }
     // As datas do filtro são lidas como data local (ver dataInputParaLocal):
     // usar new Date("2026-09-22") direto jogava o corte para o dia anterior.
     const inicio = dataInputParaLocal(advDateStart);
@@ -149,57 +156,41 @@ export default function ListaRequisicoes() {
       const end = endOfDay(fim).getTime();
       result = result.filter(r => new Date(r.created_at).getTime() <= end);
     }
-
-    // Por material e por número, por último: valem junto com os filtros acima.
-    if (buscaItemAdiada) {
-      result = result.filter(r =>
-        (r.itens || []).some(l => contemTexto(formatItemName(l.item?.nome), buscaItemAdiada))
-      );
-    }
-    if (numeroBuscado) {
-      result = result.filter(r => String(r.codigo_requisicao ?? "") === numeroBuscado);
-    }
-
     return result;
-  }, [reqs, quickFilter, filtroLancamento, advDept, advDateStart, advDateEnd, buscaItemAdiada, numeroBuscado]);
+  }, [reqs, user?.perfil, user?.id, filtroStatus, filtroLancamento, advDateStart, advDateEnd]);
+
+  const contagem = useMemo(() => {
+    const n: Partial<Record<AbaRequisicoes, number>> = {};
+    for (const a of abas) if (a.conta) n[a.aba] = filtradas.filter((r) => estaNaAba(r, a.aba)).length;
+    return n;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filtradas, ehAlmoxarifado]);
+
+  // Com busca, procura em todas as abas (como no e-mail): achar a #72 não
+  // pode depender de saber em que aba ela está.
+  const requisicoes = useMemo(
+    () => buscaAdiada
+      ? filtradas.filter((r) => casaComBusca(r, buscaAdiada))
+      : filtradas.filter((r) => estaNaAba(r, aba)),
+    [filtradas, aba, buscaAdiada]
+  );
 
   const grupos = useMemo(() => ordenarEmGrupos(requisicoes, ordem), [requisicoes, ordem]);
 
-  // Algum filtro além das buscas (item, número)? É o que avisa "nos filtros atuais".
-  const outrosFiltrosAtivos =
-    quickFilter !== "TODAS" || filtroLancamento !== "TODOS" ||
-    !!advDept.trim() || !!advDateStart || !!advDateEnd;
-
-  /** Tira os outros filtros e mantém a busca (por número, ou por item). */
-  const limparOutrosFiltros = () => {
-    setQuickFilter("TODAS");
-    setFiltroLancamento("TODOS");
-    setAdvDept("");
-    setAdvDateStart("");
-    setAdvDateEnd("");
-    // Procurando um número, o item também atrapalha.
-    if (numeroBuscado) setBuscaItem("");
-  };
+  const filtrosAtivos =
+    filtroStatus !== "TODAS" || filtroLancamento !== "TODOS" || !!advDateStart || !!advDateEnd;
 
   const limparTodosOsFiltros = () => {
-    setQuickFilter("TODAS");
+    setFiltroStatus("TODAS");
     setFiltroLancamento("TODOS");
-    setBuscaNumero("");
-    setBuscaItem("");
-    setAdvDept("");
     setAdvDateStart("");
     setAdvDateEnd("");
   };
 
-  const quickFilterOptions = [
-    { label: "Todas", value: "TODAS" },
-    { label: "Pendentes", value: "PENDENTE" },
-    { label: "Aguardando", value: "AGUARDANDO" },
-    { label: "Separando", value: "SEPARANDO" },
-    { label: "Finalizadas", value: "FINALIZADA" },
-    { label: "Rupturas", value: "RUPTURAS" },
-    { label: "Canceladas", value: "CANCELADA" }
-  ];
+  const trocarAba = (nova: AbaRequisicoes) => {
+    setAba(nova);
+    setBusca("");
+  };
 
   // Cada filtro ligado vira uma etiqueta acima da lista, com o X dele. Com os
   // filtros guardados entre telas, era fácil esquecer que um estava ligado.
@@ -208,11 +199,11 @@ export default function ListaRequisicoes() {
     return d ? format(d, "dd/MM/yy") : valor;
   };
   const filtrosLigados: { chave: string; rotulo: string; limpar: () => void }[] = [];
-  if (quickFilter !== "TODAS") {
+  if (filtroStatus !== "TODAS") {
     filtrosLigados.push({
       chave: "status",
-      rotulo: quickFilterOptions.find((o) => o.value === quickFilter)?.label || quickFilter,
-      limpar: () => setQuickFilter("TODAS"),
+      rotulo: OPCOES_DE_STATUS.find((o) => o.value === filtroStatus)?.label || filtroStatus,
+      limpar: () => setFiltroStatus("TODAS"),
     });
   }
   if (filtroLancamento !== "TODOS") {
@@ -222,14 +213,14 @@ export default function ListaRequisicoes() {
       limpar: () => setFiltroLancamento("TODOS"),
     });
   }
-  if (numeroBuscado) filtrosLigados.push({ chave: "numero", rotulo: `Nº #${numeroBuscado}`, limpar: () => setBuscaNumero("") });
-  if (buscaItem.trim()) filtrosLigados.push({ chave: "item", rotulo: `Item: ${buscaItem.trim()}`, limpar: () => setBuscaItem("") });
-  if (advDept.trim()) filtrosLigados.push({ chave: "dept", rotulo: `Setor: ${advDept.trim()}`, limpar: () => setAdvDept("") });
   if (advDateStart) filtrosLigados.push({ chave: "de", rotulo: `De ${dataCurta(advDateStart)}`, limpar: () => setAdvDateStart("") });
   if (advDateEnd) filtrosLigados.push({ chave: "ate", rotulo: `Até ${dataCurta(advDateEnd)}`, limpar: () => setAdvDateEnd("") });
 
+  const rotuloDaAba = abas.find((a) => a.aba === aba)?.rotulo || "";
+  const textoDaBusca = numeroBuscado ? `#${numeroBuscado}` : `“${buscaAdiada}”`;
+
   return (
-    <div className="space-y-6 max-w-5xl mx-auto pb-10">
+    <div className="space-y-4 max-w-5xl mx-auto pb-10">
       {user?.perfil === "SOLICITANTE" && (
         <div className="flex items-center">
           <Button
@@ -242,144 +233,33 @@ export default function ListaRequisicoes() {
           </Button>
         </div>
       )}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-teal-900 dark:text-white">
-            Requisições
-          </h1>
-          <p className="text-slate-700 text-sm">
+
+      {/* Cabeçalho: título e as duas ações da tela (Nova, atualizar). */}
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h1 className={TITULO}>Requisições</h1>
+          <p className={SUBTITULO}>
             {user?.perfil === "SOLICITANTE"
               ? "Acompanhe seus pedidos."
               : "Central operacional do Almoxarifado."}
           </p>
         </div>
-        {/* Uma barra só, tudo com 44px de altura.
-            O seletor substituiu as pílulas: elas rolavam de lado e os status do
-            fim sumiam da tela. Aqui nada some, e no celular abre o seletor do
-            próprio sistema. Começa em "Todas" ou no filtro guardado do menu. */}
-        {/* No celular os dois seletores ficam numa linha e os botões na
-            seguinte: espremer cinco controles em 375px cortava os rótulos. */}
-        <div className="flex flex-col sm:flex-row sm:items-center gap-2 w-full sm:w-auto">
-          <div className="flex items-center gap-2 w-full sm:w-auto">
-            <select
-              value={quickFilter}
-              onChange={(e) => setQuickFilter(e.target.value as FiltroRapido)}
-              aria-label="Filtrar por status"
-              className="h-11 flex-1 sm:flex-none sm:w-40 min-w-0 rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 shadow-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
-            >
-              {quickFilterOptions.map((opt) => (
-                <option key={opt.value} value={opt.value}>
-                  {opt.label}
-                </option>
-              ))}
-            </select>
-
-            {/* Só o almoxarifado lança no TOTVS; para o solicitante este
-                seletor seria só ruído na tela. */}
-            {/* Mesmas cores das pílulas: âmbar = a lançar, verde = lançada.
-                O ícone de prancheta diferencia este seletor do de status ao
-                lado, já que os dois começam em "Todas". */}
-            {ehAlmoxarifado && (
-              <div className="relative flex-1 sm:flex-none sm:w-40 min-w-0">
-                {filtroLancamento === "LANCADAS" ? (
-                  <ClipboardCheck className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-emerald-700" />
-                ) : (
-                  <ClipboardList
-                    className={`pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 ${
-                      filtroLancamento === "A_LANCAR" ? "text-amber-700" : "text-slate-500"
-                    }`}
-                  />
-                )}
-                <select
-                  value={filtroLancamento}
-                  onChange={(e) => setFiltroLancamento(e.target.value as FiltroLancamento)}
-                  aria-label="Filtrar por lançamento no TOTVS"
-                  title="Lançamento no TOTVS"
-                  className={`h-11 w-full rounded-lg border pl-8 pr-2.5 text-sm font-semibold shadow-sm focus:outline-none focus:ring-2 focus:ring-teal-500 ${
-                    filtroLancamento === "A_LANCAR"
-                      ? "border-amber-300 bg-amber-50 text-amber-900"
-                      : filtroLancamento === "LANCADAS"
-                        ? "border-emerald-300 bg-emerald-50 text-emerald-800"
-                        : "border-slate-200 bg-white text-slate-700"
-                  }`}
-                >
-                  <option value="TODOS">Todas</option>
-                  <option value="A_LANCAR">A lançar</option>
-                  <option value="LANCADAS">Lançadas</option>
-                </select>
-              </div>
-            )}
-          </div>
-
-          <div className="flex items-center gap-2 w-full sm:w-auto">
-            <Link to="/requisicoes/nova" className="flex-1 sm:flex-none sm:shrink-0">
-              <Button
-                title="Criar nova requisição"
-                className="h-11 w-full sm:w-auto px-3 bg-teal-600 hover:bg-teal-700 text-white font-bold"
-              >
-                <Plus className="h-4 w-4 sm:mr-2" />
-                <span className="sm:inline">Nova</span>
-              </Button>
-            </Link>
-
-            <Button
-              variant="outline"
-              onClick={atualizarManualmente}
-              disabled={updating}
-              title={`Atualizado às ${format(lastUpdated, "HH:mm")}`}
-              className="h-11 w-11 p-0 shrink-0 bg-white text-slate-600 hover:text-slate-900 border-slate-200"
-            >
-              <RefreshCcw className={`w-4 h-4 ${updating ? "animate-spin" : ""}`} />
+        <div className="flex items-center gap-2 shrink-0">
+          <Button
+            variant="outline"
+            onClick={atualizarManualmente}
+            disabled={updating}
+            title={`Atualizado às ${format(lastUpdated, "HH:mm")}`}
+            aria-label="Atualizar a lista"
+            className={BOTAO_ICONE}
+          >
+            <RefreshCcw className={`w-4 h-4 ${updating ? "animate-spin" : ""}`} />
+          </Button>
+          <Link to="/requisicoes/nova">
+            <Button title="Criar nova requisição" className={BOTAO_PRIMARIO}>
+              <Plus className="h-4 w-4 mr-1.5" /> Nova
             </Button>
-
-            <Button
-              variant="outline"
-              onClick={() => setShowAdvanced(!showAdvanced)}
-              title="Filtrar por número, item, departamento e período"
-              className={`h-11 w-11 p-0 shrink-0 border-slate-200 ${
-                showAdvanced || buscaNumero || buscaItem || advDept || advDateStart || advDateEnd
-                  ? "bg-teal-50 text-teal-700 border-teal-200"
-                  : "bg-white text-slate-600 hover:text-slate-900"
-              }`}
-            >
-              <Filter className="w-4 h-4" />
-            </Button>
-
-            {/* Ordenar: não esconde nada, só muda a ordem (e agrupa). */}
-            {ehAlmoxarifado && (
-              <DropdownMenu>
-                <DropdownMenuTrigger
-                  render={
-                    <Button
-                      variant="outline"
-                      title={`Ordenar: ${rotuloDaOrdem.toLowerCase()}`}
-                      aria-label="Ordenar a lista"
-                      className={`h-11 w-11 p-0 shrink-0 border-slate-200 ${
-                        ordemLigada ? "bg-teal-50 text-teal-700 border-teal-200" : "bg-white text-slate-600 hover:text-slate-900"
-                      }`}
-                    />
-                  }
-                >
-                  <ArrowUpDown className="w-4 h-4" />
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-56 p-1.5 bg-white border border-slate-200 rounded-xl shadow-lg">
-                  <p className="px-2 pt-1 pb-1.5 text-[10px] font-black text-slate-500 uppercase tracking-wider">Ordenar</p>
-                  {ORDENS.map((o) => (
-                    <DropdownMenuItem
-                      key={o.valor}
-                      onClick={() => setOrdem(o.valor)}
-                      className={`cursor-pointer rounded-lg py-2 text-sm flex items-center gap-2 ${
-                        o.valor === ordem ? "font-bold text-teal-800" : "font-medium text-slate-700"
-                      }`}
-                    >
-                      <Check className={`h-4 w-4 shrink-0 ${o.valor === ordem ? "text-teal-600" : "invisible"}`} />
-                      {o.rotulo}
-                    </DropdownMenuItem>
-                  ))}
-                </DropdownMenuContent>
-              </DropdownMenu>
-            )}
-          </div>
+          </Link>
         </div>
       </div>
 
@@ -389,59 +269,129 @@ export default function ListaRequisicoes() {
         </div>
       )}
 
-      {/* A fileira de pílulas que ficava aqui foi substituída pelo seletor na
-          barra acima: elas rolavam de lado e os últimos status saíam da tela. */}
-      <div className="flex flex-col gap-3">
+      {/* Abas da fila de trabalho, no mesmo estilo das abas do resto do app.
+          No celular viram duas linhas: rolar de lado escondia as últimas (foi
+          por isso que as antigas pílulas de status saíram). */}
+      <div
+        role="tablist"
+        aria-label="Requisições por situação"
+        className="flex flex-wrap gap-1 p-1 bg-slate-100 rounded-lg border border-slate-200 sm:flex-nowrap sm:h-11"
+      >
+        {abas.map((a) => {
+          const ativa = !buscaAdiada && a.aba === aba;
+          return (
+            <button
+              key={a.aba}
+              type="button"
+              role="tab"
+              aria-selected={ativa}
+              onClick={() => trocarAba(a.aba)}
+              className={`${ABA_DA_FILA} ${ativa ? ABA_ATIVA : ABA_INATIVA}`}
+            >
+              <span>{a.rotulo}</span>
+              {a.conta && (
+                <span className={`tabular-nums text-xs ${ativa ? "text-teal-700" : "text-slate-500"}`}>
+                  {contagem[a.aba] ?? 0}
+                </span>
+              )}
+            </button>
+          );
+        })}
+      </div>
 
-        {/* Filtros avançados, abertos pelo ícone de funil. A busca por item
-            mora aqui, junto dos outros: como barra própria, larga, ela pesava
-            mais na tela do que os filtros que importam mais. */}
+      {/* Busca única + funil (período e refinos) + ordenar. */}
+      <div className="flex items-center gap-2">
+        <div className="relative flex-1 min-w-0">
+          <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+          <input
+            type="search"
+            value={busca}
+            onChange={(e) => setBusca(e.target.value)}
+            placeholder={ehAlmoxarifado ? "Buscar nº, item, setor ou pessoa" : "Buscar nº ou item"}
+            aria-label="Buscar requisição por número, item, setor ou pessoa"
+            className={`${CAMPO} w-full pl-9 pr-3 font-medium placeholder:font-normal placeholder:text-slate-400`}
+          />
+        </div>
+
+        <Button
+          variant="outline"
+          onClick={() => setShowAdvanced(!showAdvanced)}
+          title="Filtrar por período e status"
+          aria-label="Filtros"
+          className={showAdvanced || filtrosAtivos ? BOTAO_ICONE_LIGADO : BOTAO_ICONE}
+        >
+          <Filter className="w-4 h-4" />
+        </Button>
+
+        {/* Ordenar: não esconde nada, só muda a ordem (e agrupa). */}
+        {ehAlmoxarifado && (
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              render={
+                <Button
+                  variant="outline"
+                  title={`Ordenar: ${rotuloDaOrdem.toLowerCase()}`}
+                  aria-label="Ordenar a lista"
+                  className={ordemLigada ? BOTAO_ICONE_LIGADO : BOTAO_ICONE}
+                />
+              }
+            >
+              <ArrowUpDown className="w-4 h-4" />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-56 p-1.5 bg-white border border-slate-200 rounded-xl shadow-lg">
+              <p className="px-2 pt-1 pb-1.5 text-[10px] font-black text-slate-500 uppercase tracking-wider">Ordenar</p>
+              {ORDENS.map((o) => (
+                <DropdownMenuItem
+                  key={o.valor}
+                  onClick={() => setOrdem(o.valor)}
+                  className={`cursor-pointer rounded-lg py-2 text-sm flex items-center gap-2 ${
+                    o.valor === ordem ? "font-bold text-teal-800" : "font-medium text-slate-700"
+                  }`}
+                >
+                  <Check className={`h-4 w-4 shrink-0 ${o.valor === ordem ? "text-teal-600" : "invisible"}`} />
+                  {o.rotulo}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
+      </div>
+
+      <div className="flex flex-col gap-3">
+        {/* Funil: o período e os refinos de status e lançamento. Valem dentro
+            da aba e também na busca. */}
         {showAdvanced && (
-          // Nº é curto: coluna estreita no computador; o resto divide o espaço.
-          <div className={`bg-white rounded-xl border border-slate-200 shadow-lg shadow-slate-200/50 p-4 grid grid-cols-1 sm:grid-cols-2 gap-4 ${
-            user?.perfil !== "SOLICITANTE"
-              ? "lg:grid-cols-[7rem_minmax(0,1fr)_minmax(0,1fr)_minmax(0,10rem)_minmax(0,10rem)]"
-              : "lg:grid-cols-[7rem_minmax(0,1fr)_minmax(0,10rem)_minmax(0,10rem)]"
+          <div className={`bg-white rounded-xl border border-slate-200 shadow-lg shadow-slate-200/50 p-4 grid grid-cols-2 gap-4 ${
+            ehAlmoxarifado ? "lg:grid-cols-4" : "lg:grid-cols-3"
           }`}>
             <div>
-              <label htmlFor="filtro-numero" className="text-[10px] font-bold text-slate-700 uppercase tracking-wider mb-1 block">Nº</label>
-              <Input
-                id="filtro-numero"
-                type="search"
-                inputMode="numeric"
-                placeholder="Ex.: 72"
-                aria-label="Buscar pelo número da requisição"
-                className="h-9 text-sm"
-                value={buscaNumero}
-                onChange={e => setBuscaNumero(e.target.value.replace(/[^\d#]/g, ""))}
-              />
+              <label htmlFor="filtro-status" className={ROTULO_DO_CAMPO}>Status</label>
+              <select
+                id="filtro-status"
+                value={filtroStatus}
+                onChange={(e) => setFiltroStatus(e.target.value as FiltroStatus)}
+                className="h-9 w-full rounded-md border border-input bg-transparent px-2.5 text-sm font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-teal-500"
+              >
+                {OPCOES_DE_STATUS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+              </select>
             </div>
-            {/* "detergente" mostra só as requisições que pediram detergente,
-                somado aos outros filtros ligados. */}
-            <div>
-              <label className="text-[10px] font-bold text-slate-700 uppercase tracking-wider mb-1 block">Item</label>
-              <Input
-                type="search"
-                placeholder="Buscar por item..."
-                aria-label="Buscar por item"
-                className="h-9 text-sm"
-                value={buscaItem}
-                onChange={e => setBuscaItem(e.target.value)}
-              />
-            </div>
-            {user?.perfil !== "SOLICITANTE" && (
+            {ehAlmoxarifado && (
               <div>
-                <label className="text-[10px] font-bold text-slate-700 uppercase tracking-wider mb-1 block">Departamento</label>
-                <Input
-                  placeholder="Buscar por departamento..."
-                  className="h-9 text-sm"
-                  value={advDept}
-                  onChange={e => setAdvDept(e.target.value)}
-                />
+                <label htmlFor="filtro-lancamento" className={ROTULO_DO_CAMPO}>Lançamento no TOTVS</label>
+                <select
+                  id="filtro-lancamento"
+                  value={filtroLancamento}
+                  onChange={(e) => setFiltroLancamento(e.target.value as FiltroLancamento)}
+                  className="h-9 w-full rounded-md border border-input bg-transparent px-2.5 text-sm font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-teal-500"
+                >
+                  <option value="TODOS">Todas</option>
+                  <option value="A_LANCAR">A lançar</option>
+                  <option value="LANCADAS">Lançadas</option>
+                </select>
               </div>
             )}
             <div>
-              <label className="text-[10px] font-bold text-slate-700 uppercase tracking-wider mb-1 block">Data Inicial</label>
+              <label className={ROTULO_DO_CAMPO}>Data Inicial</label>
               <Input
                 type="date"
                 className="h-9 text-sm"
@@ -450,7 +400,7 @@ export default function ListaRequisicoes() {
               />
             </div>
             <div>
-              <label className="text-[10px] font-bold text-slate-700 uppercase tracking-wider mb-1 block">Data Final</label>
+              <label className={ROTULO_DO_CAMPO}>Data Final</label>
               <Input
                 type="date"
                 className="h-9 text-sm"
@@ -462,9 +412,9 @@ export default function ListaRequisicoes() {
         )}
 
         {/* Filtros ligados, cada um com o seu X, e o "Limpar filtros" que
-            zera tudo de uma vez. Só aparece quando há filtro. */}
-        {/* A ordem fora da padrão também ganha etiqueta (outra cor: não é
-            filtro, não esconde nada), e o "Limpar filtros" não mexe nela. */}
+            zera tudo de uma vez. A ordem fora da padrão também ganha etiqueta
+            (outra cor: não é filtro, não esconde nada), e o "Limpar filtros"
+            não mexe nela. */}
         {(filtrosLigados.length > 0 || ordemLigada) && (
           <div className="flex flex-wrap items-center gap-2">
             {ordemLigada && (
@@ -504,27 +454,16 @@ export default function ListaRequisicoes() {
           </div>
         )}
 
-        {/* Com zero, quem fala é o aviso de lista vazia lá embaixo. */}
-        {buscaItemAdiada && !numeroBuscado && !loading && requisicoes.length > 0 && (
-          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-600">
-            <span>
-              <strong className="text-slate-800">{requisicoes.length}</strong>{" "}
-              {requisicoes.length === 1 ? "requisição tem" : "requisições têm"}{" "}
-              <strong className="text-slate-800">“{buscaItemAdiada}”</strong>
-              {outrosFiltrosAtivos && " nos filtros atuais"}
-            </span>
-            {outrosFiltrosAtivos && (
-              <button
-                type="button"
-                onClick={limparOutrosFiltros}
-                className="font-bold text-teal-700 hover:text-teal-900 underline underline-offset-2"
-              >
-                buscar em todas
-              </button>
-            )}
-          </div>
+        {/* Buscando, a lista sai de todas as abas: diz isso, para ninguém
+            achar que a busca está presa na aba de antes. */}
+        {buscaAdiada && !loading && requisicoes.length > 0 && (
+          <p className="text-xs text-slate-600 [overflow-wrap:anywhere]">
+            <strong className="text-slate-800">{requisicoes.length}</strong>{" "}
+            {requisicoes.length === 1 ? "requisição" : "requisições"} com{" "}
+            <strong className="text-slate-800">{textoDaBusca}</strong> em todas as abas
+            {filtrosAtivos && ", nos filtros atuais"}.
+          </p>
         )}
-
       </div>
 
       {loading ? (
@@ -532,27 +471,19 @@ export default function ListaRequisicoes() {
           Carregando requisições...
         </div>
       ) : requisicoes.length === 0 ? (
-        <div className="text-center py-16 bg-slate-50 rounded-xl border border-slate-200/80 shadow-md shadow-slate-200/50 border-dashed">
+        <div className="text-center py-12 bg-slate-50 rounded-xl border border-slate-200/80 shadow-md shadow-slate-200/50 border-dashed">
           <p className="text-slate-700 mb-4 font-medium px-4 [overflow-wrap:anywhere]">
-            {numeroBuscado
-              ? (outrosFiltrosAtivos || buscaItemAdiada)
-                ? `A requisição #${numeroBuscado} não aparece com os filtros atuais.`
-                : `Nenhuma requisição #${numeroBuscado} encontrada.`
-              : buscaItemAdiada
-                ? `Nenhuma requisição com “${buscaItemAdiada}”${outrosFiltrosAtivos ? " nos filtros atuais" : ""}.`
-                : "Nenhuma requisição encontrada com os filtros atuais."}
+            {buscaAdiada
+              ? `Nenhuma requisição com ${textoDaBusca}${filtrosAtivos ? " nos filtros atuais" : ""}.`
+              : filtrosAtivos
+                ? `Nada em “${rotuloDaAba}” com os filtros atuais.`
+                : aba === "A_FAZER"
+                  ? (ehAlmoxarifado ? "Nada a fazer agora." : "Nenhuma requisição em aberto.")
+                  : aba === "TODAS"
+                    ? "Nenhuma requisição ainda."
+                    : `Nada em “${rotuloDaAba}”.`}
           </p>
-          {/* Buscando um número ou um item com filtro ligado, o próximo passo
-              natural é procurar em todas; criar requisição não tem a ver. */}
-          {(numeroBuscado && (outrosFiltrosAtivos || buscaItemAdiada)) || (buscaItemAdiada && outrosFiltrosAtivos) ? (
-            <Button
-              variant="outline"
-              onClick={limparOutrosFiltros}
-              className="border-teal-600 text-teal-700 hover:bg-teal-50 font-bold"
-            >
-              Buscar em todas as requisições
-            </Button>
-          ) : filtrosLigados.length > 0 ? (
+          {filtrosAtivos ? (
             <Button
               variant="outline"
               onClick={limparTodosOsFiltros}
@@ -560,7 +491,15 @@ export default function ListaRequisicoes() {
             >
               <FilterX className="h-4 w-4 mr-2" /> Limpar filtros
             </Button>
-          ) : (
+          ) : !buscaAdiada && aba !== "TODAS" ? (
+            <Button
+              variant="outline"
+              onClick={() => trocarAba("TODAS")}
+              className="border-teal-600 text-teal-700 hover:bg-teal-50 font-bold"
+            >
+              Ver todas
+            </Button>
+          ) : !buscaAdiada ? (
             <Link to="/requisicoes/nova">
               <Button
                 variant="outline"
@@ -569,21 +508,30 @@ export default function ListaRequisicoes() {
                 Criar Nova Requisição
               </Button>
             </Link>
-          )}
+          ) : null}
         </div>
       ) : (
         <div className="space-y-5">
           {grupos.map((g) => (
-            <section key={g.titulo ?? "todas"} className="grid gap-2 sm:gap-3">
+            <section key={g.titulo ?? "todas"} className="space-y-2">
               {g.titulo && (
                 <h2 className="flex items-baseline gap-1.5 px-1 text-xs font-black uppercase tracking-wider text-slate-600">
                   <span className="truncate">{g.titulo}</span>
                   <span className="font-semibold text-slate-400">· {g.reqs.length}</span>
                 </h2>
               )}
-              {g.reqs.map((req) => (
-                <RequisicaoCard key={req.id} req={req} buscaItem={buscaItemAdiada} />
-              ))}
+              {/* Celular: cartões. Computador: uma tabela, com o cabeçalho
+                  das colunas uma vez só em vez de um rótulo em cada cartão. */}
+              <div className="grid gap-2 lg:gap-0 lg:bg-white lg:rounded-xl lg:border lg:border-slate-200 lg:shadow-lg lg:shadow-slate-200/50 lg:overflow-hidden lg:divide-y lg:divide-slate-100">
+                <CabecalhoDaTabela />
+                {g.reqs.map((req) => (
+                  <RequisicaoCard
+                    key={req.id}
+                    req={req}
+                    buscaItem={numeroBuscado ? undefined : buscaAdiada}
+                  />
+                ))}
+              </div>
             </section>
           ))}
         </div>

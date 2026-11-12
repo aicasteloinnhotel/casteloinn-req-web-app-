@@ -43,6 +43,24 @@ export const ROTULO_TIPO: Record<TipoMudanca, string> = {
 
 export const VERSOES: Versao[] = [
   {
+    versao: "1.7",
+    data: "12/11/2026",
+    titulo: "Lista de Requisições mais prática",
+    mudancas: [
+      {
+        tipo: "melhoria",
+        texto:
+          "Requisições abre no que está em aberto, com abas para as que aguardam, as concluídas e todas. Uma busca só acha pelo número ou pelo item.",
+      },
+      {
+        tipo: "melhoria",
+        publico: "almoxarifado",
+        texto:
+          "Abas com contagem: A fazer, Aguardando e A lançar. A busca também acha pelo setor e por quem pediu. No computador a lista virou uma tabela: cabem bem mais requisições na tela.",
+      },
+    ],
+  },
+  {
     versao: "1.6",
     data: "11/11/2026",
     titulo: "Ordenar a lista de Requisições",

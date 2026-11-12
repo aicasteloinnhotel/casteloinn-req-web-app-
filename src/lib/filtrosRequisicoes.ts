@@ -8,13 +8,12 @@
  */
 
 export type FiltrosRequisicoes = {
-  /** Número da requisição (72 ou #72). */
-  numero: string;
-  /** Busca por material: só as requisições que têm esse item. */
-  item: string;
+  /** Aba aberta (ver abasRequisicoes.ts). */
+  aba: string;
+  /** Busca única: número (72 ou #72), item, setor ou quem pediu. */
+  busca: string;
   status: string;
   lancamento: string;
-  departamento: string;
   dataInicial: string;
   dataFinal: string;
   painelAberto: boolean;
