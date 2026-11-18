@@ -61,15 +61,37 @@ export interface LinhaDeReposicao {
   item?: { nome?: string; unidade?: string } | null;
 }
 
+/** Como a linha vai na cotação, quando foi editada (AJUSTE_10). Vazio = o original. */
+export interface EdicaoDeLinha {
+  item_id: string;
+  /** A unidade da reposição: é a chave da linha (e do preço). */
+  unidade: string;
+  nome?: string | null;
+  marca?: string | null;
+  unidade_compra?: string | null;
+  quantidade?: number | null;
+}
+
 /** Uma linha da cotação: um material numa unidade (1 UN + 2 CX = duas linhas). */
 export interface LinhaCotacao {
   chave: string;
   item_id: string;
+  /** Unidade da reposição: a chave da linha e do preço. Não muda com a edição. */
   unidade: string;
+  /** Nome que vai na cotação (o editado ou o do cadastro). */
   nome: string;
+  /** Quantidade da COMPRA (a editada ou a da reposição): é ela que multiplica o preço. */
   quantidade: number;
+  /** Unidade da COMPRA (a editada ou a da reposição): é a que aparece e vai no texto. */
+  unidadeCompra: string;
+  marca: string;
+  /** O original, para mostrar e para restaurar. */
+  nomeCadastro: string;
+  quantidadeReposicao: number;
+  editada: boolean;
   /** As linhas da reposição que ela junta: é nelas que o pedido grava. */
   ids: string[];
+  partes: { id: string; quantidade: number }[];
 }
 
 export const chaveDaLinha = (itemId: string, unidade: string) => `${itemId}|${unidade}`;
@@ -77,27 +99,65 @@ export const chaveDaLinha = (itemId: string, unidade: string) => `${itemId}|${un
 const unidadeDe = (l: LinhaDeReposicao) =>
   (l.unidade || l.item?.unidade || UNIDADE_PADRAO).trim().toUpperCase();
 
-export function montarLinhas(linhas: LinhaDeReposicao[]): LinhaCotacao[] {
+const limpo = (t?: string | null) => (t || "").trim();
+
+export function montarLinhas(linhas: LinhaDeReposicao[], edicoes: EdicaoDeLinha[] = []): LinhaCotacao[] {
   const mapa = new Map<string, LinhaCotacao>();
   for (const l of linhas) {
     const unidade = unidadeDe(l);
     const chave = chaveDaLinha(l.item_id, unidade);
     if (!mapa.has(chave)) {
+      const nome = formatItemName(l.item?.nome) || "Item";
       mapa.set(chave, {
         chave,
         item_id: l.item_id,
         unidade,
-        nome: formatItemName(l.item?.nome) || "Item",
+        nome,
         quantidade: 0,
+        unidadeCompra: unidade,
+        marca: "",
+        nomeCadastro: nome,
+        quantidadeReposicao: 0,
+        editada: false,
         ids: [],
+        partes: [],
       });
     }
     const c = mapa.get(chave)!;
-    c.quantidade = Math.round((c.quantidade + (Number(l.quantidade) || 0)) * 1000) / 1000;
+    const q = Number(l.quantidade) || 0;
+    c.quantidadeReposicao = Math.round((c.quantidadeReposicao + q) * 1000) / 1000;
+    c.quantidade = c.quantidadeReposicao;
     c.ids.push(l.id);
+    c.partes.push({ id: l.id, quantidade: q });
   }
-  return Array.from(mapa.values()).sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR"));
+  for (const e of edicoes) {
+    const c = mapa.get(chaveDaLinha(e.item_id, (e.unidade || "").toUpperCase()));
+    if (!c) continue;
+    if (limpo(e.nome)) c.nome = limpo(e.nome).toUpperCase();
+    if (limpo(e.marca)) c.marca = limpo(e.marca);
+    if (limpo(e.unidade_compra)) c.unidadeCompra = limpo(e.unidade_compra).toUpperCase();
+    if (e.quantidade != null && Number(e.quantidade) > 0) c.quantidade = Number(e.quantidade);
+    c.editada =
+      c.nome !== c.nomeCadastro || !!c.marca || c.unidadeCompra !== c.unidade || c.quantidade !== c.quantidadeReposicao;
+  }
+  return Array.from(mapa.values()).sort((a, b) => a.nomeCadastro.localeCompare(b.nomeCadastro, "pt-BR"));
 }
+
+/**
+ * Quanto de cada linha da reposição vai no pedido, na unidade da compra.
+ * Sem edição é a própria quantidade; com edição (24 UN viram 2 CX), divide
+ * na proporção — a soma dá a quantidade da compra.
+ */
+export function partesDaCompra(linha: LinhaCotacao): { id: string; quantidade: number }[] {
+  if (linha.quantidadeReposicao <= 0) return linha.partes.map((p) => ({ id: p.id, quantidade: 0 }));
+  return linha.partes.map((p) => ({
+    id: p.id,
+    quantidade: Math.round(((p.quantidade / linha.quantidadeReposicao) * linha.quantidade) * 1000) / 1000,
+  }));
+}
+
+/** "Detergente neutro 500ml (Ypê)". */
+export const descricaoDaLinha = (l: Pick<LinhaCotacao, "nome" | "marca">) => (l.marca ? `${l.nome} (${l.marca})` : l.nome);
 
 /**
  * Lê o preço como a pessoa digita: "4,10", "4.10", "R$ 1.234,56", "1234.5".
@@ -225,7 +285,7 @@ export function textoParaPedirPreco(linhas: LinhaCotacao[]): string {
   return [
     "*Cotação — Castelo Inn*",
     "",
-    ...linhas.map((l) => `• ${formatarQtd(l.quantidade)} ${l.unidade} — ${l.nome}`),
+    ...linhas.map((l) => `• ${formatarQtd(l.quantidade)} ${l.unidadeCompra} — ${descricaoDaLinha(l)}`),
   ].join("\n");
 }
 
@@ -235,9 +295,129 @@ export function textoDoPedido(pedido: PedidoDoFornecedor): string {
     `*Pedido — Castelo Inn*`,
     "",
     ...pedido.itens.map(
-      (i) => `• ${formatarQtd(i.linha.quantidade)} ${i.linha.unidade} — ${i.linha.nome} (${formatarReais(i.preco)})`,
+      (i) => `• ${formatarQtd(i.linha.quantidade)} ${i.linha.unidadeCompra} — ${descricaoDaLinha(i.linha)} — ${formatarReais(i.preco)}`,
     ),
     "",
     `Total: ${formatarReais(pedido.total)}`,
   ].join("\n");
+}
+
+// ---------------------------------------------------------------------------
+//  IMPORTAR O ORÇAMENTO DO FORNECEDOR (.csv)
+// ---------------------------------------------------------------------------
+
+const semAcento = (t: string) => t.normalize("NFD").replace(/[̀-ͯ]/g, "");
+/** Nome para comparar: sem acento, maiúsculas, só letras e números. */
+export const nomeParaComparar = (t: string) =>
+  semAcento(t || "").toUpperCase().replace(/[^A-Z0-9]+/g, " ").trim();
+
+/** O modelo .csv da cotação (abre no Excel): uma linha por item, preço em branco. */
+export function csvModelo(linhas: LinhaCotacao[]): string {
+  const campo = (t: string) => (/[;"\n]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t);
+  return [
+    "Produto;Marca;Unidade;Quantidade;Preço",
+    ...linhas.map((l) => [campo(l.nome), campo(l.marca), l.unidadeCompra, formatarQtd(l.quantidade), ""].join(";")),
+  ].join("\r\n");
+}
+
+/** Divide uma linha de .csv respeitando aspas ("a;b" é um campo só). */
+function dividir(linha: string, sep: string): string[] {
+  const campos: string[] = [];
+  let atual = "";
+  let aspas = false;
+  for (let i = 0; i < linha.length; i++) {
+    const ch = linha[i];
+    if (ch === '"') {
+      if (aspas && linha[i + 1] === '"') { atual += '"'; i++; }
+      else aspas = !aspas;
+    } else if (ch === sep && !aspas) {
+      campos.push(atual.trim());
+      atual = "";
+    } else atual += ch;
+  }
+  campos.push(atual.trim());
+  return campos;
+}
+
+export interface LinhaDoOrcamento {
+  produto: string;
+  preco: number;
+}
+
+/**
+ * Lê o orçamento: .csv com ";" (Excel em português), tabulação (copiado da
+ * planilha) ou ",". Com cabeçalho, acha as colunas pelo nome (Produto/Item/
+ * Descrição e Preço/Valor/Unitário); sem cabeçalho, o produto é a primeira
+ * coluna com texto e o preço a última com número. Linha sem preço é ignorada.
+ */
+export function lerOrcamento(texto: string): { linhas: LinhaDoOrcamento[]; ignoradas: number } {
+  const brutas = (texto || "").replace(/^﻿/, "").split(/\r?\n/).filter((l) => l.trim());
+  if (brutas.length === 0) return { linhas: [], ignoradas: 0 };
+  const sep = brutas.some((l) => l.includes(";")) ? ";" : brutas.some((l) => l.includes("\t")) ? "\t" : ",";
+  const tabela = brutas.map((l) => dividir(l, sep));
+  const cab = tabela[0].map((c) => nomeParaComparar(c));
+  let colProduto = cab.findIndex((c) => /^(PRODUTO|ITEM|DESCRICAO|MATERIAL|NOME)/.test(c));
+  let colPreco = cab.findIndex((c) => /(PRECO|VALOR|UNITARIO)/.test(c) && !/TOTAL/.test(c));
+  const temCabecalho = colProduto >= 0 || colPreco >= 0;
+  const dados = temCabecalho ? tabela.slice(1) : tabela;
+  const linhas: LinhaDoOrcamento[] = [];
+  let ignoradas = 0;
+  for (const campos of dados) {
+    let produto = colProduto >= 0 ? campos[colProduto] : campos.find((c) => /[a-zA-ZÀ-ú]/.test(c)) || "";
+    let preco: number | null | undefined = null;
+    if (colPreco >= 0) preco = lerPreco(campos[colPreco] || "");
+    else {
+      for (let i = campos.length - 1; i >= 0; i--) {
+        const p = lerPreco(campos[i]);
+        if (typeof p === "number" && campos[i] !== produto) { preco = p; break; }
+      }
+    }
+    if (!produto.trim() || typeof preco !== "number") { ignoradas++; continue; }
+    linhas.push({ produto: produto.trim(), preco });
+  }
+  return { linhas, ignoradas };
+}
+
+/** Quão parecido é o nome do orçamento com o da linha: 3 igual, 2 um contém o outro, 1 palavras em comum. */
+function semelhanca(a: string, b: string): number {
+  const x = nomeParaComparar(a);
+  const y = nomeParaComparar(b);
+  if (!x || !y) return 0;
+  if (x === y) return 3;
+  if (x.includes(y) || y.includes(x)) return 2;
+  const px = x.split(" ").filter((p) => p.length > 1);
+  const py = new Set(y.split(" ").filter((p) => p.length > 1));
+  const comuns = px.filter((p) => py.has(p)).length;
+  const menor = Math.min(px.length, py.size) || 1;
+  return comuns / menor >= 0.6 ? 1 : 0;
+}
+
+export interface Correspondencia {
+  orcamento: LinhaDoOrcamento;
+  /** A linha da cotação achada (ou escolhida); null = não achou. */
+  chave: string | null;
+  certeza: number;
+}
+
+/**
+ * Acha cada linha do orçamento na cotação, pelo nome (o da cotação ou o do
+ * cadastro). Cada linha da cotação recebe no máximo um preço: vale o mais parecido.
+ */
+export function casarOrcamento(orcamento: LinhaDoOrcamento[], linhas: LinhaCotacao[]): Correspondencia[] {
+  const candidatos: { i: number; chave: string; certeza: number }[] = [];
+  orcamento.forEach((o, i) => {
+    for (const l of linhas) {
+      const c = Math.max(semelhanca(o.produto, l.nome), semelhanca(o.produto, l.nomeCadastro));
+      if (c > 0) candidatos.push({ i, chave: l.chave, certeza: c });
+    }
+  });
+  candidatos.sort((a, b) => b.certeza - a.certeza);
+  const r: Correspondencia[] = orcamento.map((o) => ({ orcamento: o, chave: null, certeza: 0 }));
+  const usadas = new Set<string>();
+  for (const c of candidatos) {
+    if (r[c.i].chave || usadas.has(c.chave)) continue;
+    r[c.i] = { ...r[c.i], chave: c.chave, certeza: c.certeza };
+    usadas.add(c.chave);
+  }
+  return r;
 }

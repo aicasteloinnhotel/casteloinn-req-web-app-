@@ -43,6 +43,25 @@ export const ROTULO_TIPO: Record<TipoMudanca, string> = {
 
 export const VERSOES: Versao[] = [
   {
+    versao: "1.12",
+    data: "18/11/2026",
+    titulo: "Editar itens e importar orçamento na cotação",
+    mudancas: [
+      {
+        tipo: "novo",
+        publico: "almoxarifado",
+        texto:
+          "Na cotação, toque no nome do item para mudar produto, marca, unidade e quantidade. Vale para todos os fornecedores e vai na lista e no pedido do WhatsApp.",
+      },
+      {
+        tipo: "novo",
+        publico: "almoxarifado",
+        texto:
+          "Importar orçamento (.csv): no nome do fornecedor, escolha o arquivo e o app acha cada produto e preenche os preços, com uma prévia antes. “Modelo .csv” baixa a planilha da cotação.",
+      },
+    ],
+  },
+  {
     versao: "1.11",
     data: "18/11/2026",
     titulo: "Fornecedores com WhatsApp e pedido mínimo",

@@ -537,6 +537,17 @@ export default function AjudaSobre() {
                     fica guardado: na próxima cotação aparece a última compra.
                   </p>
                   <p>
+                    Para mudar como o item vai na cotação (produto, marca, unidade, quantidade), toque
+                    no nome dele. Vale para todos os fornecedores e vai na lista e no pedido; o
+                    cadastro não muda.
+                  </p>
+                  <p>
+                    Orçamento em arquivo: no nome do fornecedor, <strong>Importar orçamento (.csv)</strong>.
+                    O app acha cada produto pelo nome e mostra antes de preencher; o que não achou dá
+                    para escolher na lista. <strong>Modelo .csv</strong> baixa a planilha da cotação
+                    (Produto, Marca, Unidade, Quantidade, Preço) para o fornecedor preencher.
+                  </p>
+                  <p>
                     WhatsApp, pedido mínimo e excluir fornecedor: no ícone de loja da Lista de
                     Reposição, ou no nome do fornecedor dentro da cotação.
                   </p>

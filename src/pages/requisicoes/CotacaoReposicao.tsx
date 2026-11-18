@@ -1,8 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { format } from "date-fns";
-import { ArrowLeft, ArrowRightLeft, Check, ChevronDown, Copy, MessageCircle, Pencil, Plus, Truck, X } from "lucide-react";
+import { ArrowLeft, ArrowRightLeft, Check, ChevronDown, Copy, Download, FileUp, MessageCircle, Pencil, Plus, Truck, X } from "lucide-react";
 import { EditarFornecedor } from "@/components/FornecedoresDialog";
+import { EditarLinhaCotacao, ImportarOrcamento } from "@/components/CotacaoDialogs";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -15,12 +16,17 @@ import {
   fazerPedido,
   getDadosDasCotacoes,
   getFornecedores,
+  getLinhasEditadas,
   getUltimosPrecos,
+  salvarLinha,
   salvarPreco,
   tirarFornecedorDaCotacao,
   type UltimoPreco,
 } from "@/services/cotacao";
 import {
+  csvModelo,
+  partesDaCompra,
+  type EdicaoDeLinha,
   alternativasDaLinha,
   faltaParaMinimo,
   linkWhatsapp,
@@ -123,15 +129,20 @@ export default function CotacaoReposicao() {
   const [incluindo, setIncluindo] = useState(false);
   const [editandoFornecedor, setEditandoFornecedor] = useState<Fornecedor | null>(null);
   const [aplicando, setAplicando] = useState(false);
+  const [edicoes, setEdicoes] = useState<EdicaoDeLinha[]>([]);
+  const [editandoLinha, setEditandoLinha] = useState<LinhaCotacao | null>(null);
+  const [importandoDe, setImportandoDe] = useState<Fornecedor | null>(null);
 
   const carregar = useCallback(async (mostrar = true) => {
     if (mostrar) setCarregando(true);
     try {
-      const [lista, fornecedores, dados] = await Promise.all([
+      const [lista, fornecedores, dados, editadas] = await Promise.all([
         getListaReposicao(),
         getFornecedores(),
         getDadosDasCotacoes([lote]),
+        getLinhasEditadas(lote),
       ]);
+      setEdicoes(editadas);
       const abertas = lista.filter(linhaAberta);
       const daCotacao = abertas.filter((l) => l.cotacao_lote === lote);
       // Mesmo número da Lista de Reposição: a mais antiga é a Cotação 1.
@@ -163,7 +174,7 @@ export default function CotacaoReposicao() {
     carregar(true);
   }, [carregar]);
 
-  const linhas = useMemo(() => montarLinhas(linhasReposicao), [linhasReposicao]);
+  const linhas = useMemo(() => montarLinhas(linhasReposicao, edicoes), [linhasReposicao, edicoes]);
   const fornecedoresDaCotacao = useMemo(
     () => participantes.map((id) => todos.find((f) => f.id === id)).filter((f): f is Fornecedor => !!f),
     [participantes, todos],
@@ -250,6 +261,47 @@ export default function CotacaoReposicao() {
     }
   };
 
+  /** Grava como a linha vai na cotação (igual para todos os fornecedores). */
+  const gravarLinha = async (linha: LinhaCotacao, campos: Parameters<typeof salvarLinha>[3]) => {
+    try {
+      await salvarLinha(lote, linha.item_id, linha.unidade, campos);
+      setEdicoes((atual) => {
+        const resto = atual.filter((e) => !(e.item_id === linha.item_id && e.unidade === linha.unidade));
+        return campos ? [...resto, { item_id: linha.item_id, unidade: linha.unidade, ...campos }] : resto;
+      });
+      setEditandoLinha(null);
+    } catch (e: any) {
+      toast.error(e?.message || "Não foi possível salvar o item.");
+    }
+  };
+
+  /** Preenche os preços do orçamento importado na coluna do fornecedor. */
+  const preencherOrcamento = async (fornecedor: Fornecedor, itens: { chave: string; preco: number }[]) => {
+    let feitos = 0;
+    for (const { chave, preco } of itens) {
+      const linha = linhas.find((l) => l.chave === chave);
+      if (!linha) continue;
+      await gravarPreco(linha, fornecedor.id, preco);
+      feitos++;
+    }
+    setImportandoDe(null);
+    setFornecedorAtivo(fornecedor.id);
+    toast.success(`${feitos} ${feitos === 1 ? "preço preenchido" : "preços preenchidos"} na ${fornecedor.nome}.`);
+  };
+
+  /** O modelo .csv da cotação, para o fornecedor preencher (ou para importar depois). */
+  const baixarModelo = () => {
+    const blob = new Blob(["﻿" + csvModelo(linhas)], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `cotacao-${numero}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+
   /** Abre a conversa do fornecedor com o texto escrito; sem número, copia. */
   const abrirWhatsapp = (f: Fornecedor, texto: string) => {
     const link = linkWhatsapp(f.whatsapp, texto);
@@ -291,7 +343,18 @@ export default function CotacaoReposicao() {
       }));
     setAplicando(true);
     try {
-      await fazerPedido(pedido.itens.map((i) => ({ ids: i.linha.ids, preco: i.preco })), pedido.fornecedor.id, prazo);
+      await fazerPedido(
+        pedido.itens.map((i) => {
+          const outraCompra = i.linha.unidadeCompra !== i.linha.unidade || i.linha.quantidade !== i.linha.quantidadeReposicao;
+          return {
+            ids: i.linha.ids,
+            preco: i.preco,
+            ...(outraCompra ? { compra: { unidade: i.linha.unidadeCompra, partes: partesDaCompra(i.linha) } } : {}),
+          };
+        }),
+        pedido.fornecedor.id,
+        prazo,
+      );
       const sobra = linhasReposicao.filter((l) => !ids.has(l.id)).length;
       toast.success(`Pedido ${pedido.fornecedor.nome}: ${pedido.itens.length} ${pedido.itens.length === 1 ? "item" : "itens"} em Aguardando entrega.`, {
         duration: 10000,
@@ -387,7 +450,7 @@ export default function CotacaoReposicao() {
     return (
       <span className="block text-[11px] font-medium text-slate-500">
         Última: {formatarReais(u.preco)}
-        {u.unidade && u.unidade.toUpperCase() !== linha.unidade ? `/${u.unidade}` : ""}
+        {u.unidade && u.unidade.toUpperCase() !== linha.unidadeCompra ? `/${u.unidade}` : ""}
         {u.fornecedor_id && nomeDe(u.fornecedor_id) ? ` · ${nomeDe(u.fornecedor_id)}` : ""}
         {` · ${format(new Date(u.em), "dd/MM")}`}
       </span>
@@ -399,7 +462,7 @@ export default function CotacaoReposicao() {
       {/* Cabeçalho */}
       <div className="flex flex-wrap items-center gap-3">
         {voltar}
-        <div className="min-w-0 flex-1">
+        <div className="min-w-0 flex-1 basis-48">
           <h1 className={TITULO}>Cotação {numero}</h1>
           <p className="text-xs font-medium text-slate-500 tabular-nums">
             {criadaEm ? `${format(new Date(criadaEm), "dd/MM HH:mm")} · ` : ""}
@@ -407,13 +470,24 @@ export default function CotacaoReposicao() {
             {semPreco.length > 0 && semPreco.length < linhas.length && ` · ${semPreco.length} sem preço`}
           </p>
         </div>
-        <Button
-          variant="outline"
-          onClick={() => copiar(textoParaPedirPreco(linhas), "Lista copiada: cole no WhatsApp dos fornecedores.")}
-          className={BOTAO_SECUNDARIO}
-        >
-          <Copy className="h-4 w-4" /> Copiar lista
-        </Button>
+        {/* No celular os botões vão para a linha de baixo, cada um com metade. */}
+        <div className="flex items-center gap-2 w-full sm:w-auto">
+          <Button
+            variant="outline"
+            onClick={baixarModelo}
+            title="Planilha da cotação para o fornecedor preencher e você importar depois"
+            className={`${BOTAO_SECUNDARIO} flex-1 sm:flex-none`}
+          >
+            <Download className="h-4 w-4" /> Modelo .csv
+          </Button>
+          <Button
+            variant="outline"
+            onClick={() => copiar(textoParaPedirPreco(linhas), "Lista copiada: cole no WhatsApp dos fornecedores.")}
+            className={`${BOTAO_SECUNDARIO} flex-1 sm:flex-none`}
+          >
+            <Copy className="h-4 w-4" /> Copiar lista
+          </Button>
+        </div>
       </div>
 
       {/* Fornecedores da cotação */}
@@ -441,6 +515,9 @@ export default function CotacaoReposicao() {
                 <DropdownMenuItem onClick={() => abrirWhatsapp(f, textoParaPedirPreco(linhas))} className={ITEM_DO_MENU}>
                   <MessageCircle className="h-3.5 w-3.5 mr-2 text-slate-500" />
                   {f.whatsapp ? "Pedir preço no WhatsApp" : "Copiar lista (sem WhatsApp)"}
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setImportandoDe(f)} className={ITEM_DO_MENU}>
+                  <FileUp className="h-3.5 w-3.5 mr-2 text-slate-500" /> Importar orçamento (.csv)
                 </DropdownMenuItem>
                 <DropdownMenuItem onClick={() => setEditandoFornecedor(f)} className={ITEM_DO_MENU}>
                   <Pencil className="h-3.5 w-3.5 mr-2 text-slate-500" /> WhatsApp e pedido mínimo
@@ -507,11 +584,23 @@ export default function CotacaoReposicao() {
                       return (
                         <tr key={linha.chave} className="align-middle">
                           <td className="px-4 py-2 sticky left-0 bg-white">
-                            <span className="block font-bold text-teal-950">{linha.nome}</span>
+                            {/* Tocar no nome edita como ele vai na cotação (para todos). */}
+                            <button
+                              type="button"
+                              onClick={() => setEditandoLinha(linha)}
+                              title="Editar produto, marca, unidade e quantidade"
+                              className="group text-left"
+                            >
+                              <span className="flex items-center gap-1.5 font-bold text-teal-950">
+                                {linha.nome}
+                                <Pencil className="h-3 w-3 text-slate-300 group-hover:text-teal-600 shrink-0" />
+                              </span>
+                              {linha.marca && <span className="block text-[11px] font-semibold text-slate-600">{linha.marca}</span>}
+                            </button>
                             {ultimoDe(linha)}
                           </td>
                           <td className="px-2 py-2 text-right whitespace-nowrap font-bold text-slate-700 tabular-nums">
-                            {formatarQtd(linha.quantidade)} <span className="text-xs font-medium text-slate-500">{linha.unidade}</span>
+                            {formatarQtd(linha.quantidade)} <span className="text-xs font-medium text-slate-500">{linha.unidadeCompra}</span>
                           </td>
                           {fornecedoresDaCotacao.map((f) => (
                             <td key={f.id} className="px-2 py-2">
@@ -579,16 +668,24 @@ export default function CotacaoReposicao() {
                     const v = vencedorDaLinha(precos, linha, ordem);
                     return (
                       <div key={linha.chave} className="flex items-center gap-3 px-4 py-2.5">
-                        <div className="min-w-0 flex-1">
-                          <p className="text-sm font-bold text-teal-950 [overflow-wrap:anywhere]">{linha.nome}</p>
+                        <button
+                          type="button"
+                          onClick={() => setEditandoLinha(linha)}
+                          aria-label={`Editar ${linha.nome}`}
+                          className="min-w-0 flex-1 text-left"
+                        >
+                          <p className="text-sm font-bold text-teal-950 [overflow-wrap:anywhere]">
+                            {linha.nome} <Pencil className="inline h-3 w-3 -mt-0.5 text-slate-300" />
+                          </p>
                           <p className="text-xs text-slate-600">
-                            <span className="font-bold text-slate-800">{formatarQtd(linha.quantidade)} {linha.unidade}</span>
+                            <span className="font-bold text-slate-800">{formatarQtd(linha.quantidade)} {linha.unidadeCompra}</span>
+                            {linha.marca && <> · {linha.marca}</>}
                             {v && v.fornecedor_id !== ativo.id && (
                               <> · melhor: {nomeDe(v.fornecedor_id)} {formatarReais(v.preco)}</>
                             )}
                           </p>
                           {ultimoDe(linha)}
-                        </div>
+                        </button>
                         <div className="w-28 shrink-0">
                           <CampoPreco
                             valor={precoDe(linha, ativo.id)}
@@ -697,7 +794,7 @@ export default function CotacaoReposicao() {
                             <div className="min-w-0 flex-1">
                               <p className="font-bold text-teal-950 [overflow-wrap:anywhere]">{i.linha.nome}</p>
                               <p className="text-xs text-slate-600 tabular-nums">
-                                {formatarQtd(i.linha.quantidade)} {i.linha.unidade} × {formatarReais(i.preco)}
+                                {formatarQtd(i.linha.quantidade)} {i.linha.unidadeCompra} × {formatarReais(i.preco)}{i.linha.marca ? ` · ${i.linha.marca}` : ""}
                               </p>
                             </div>
                             <span className="shrink-0 font-bold text-slate-800 tabular-nums">{formatarReais(i.subtotal)}</span>
@@ -767,6 +864,14 @@ export default function CotacaoReposicao() {
           </section>
         </>
       )}
+
+      <EditarLinhaCotacao linha={editandoLinha} aoFechar={() => setEditandoLinha(null)} aoSalvar={gravarLinha} />
+      <ImportarOrcamento
+        fornecedor={importandoDe}
+        linhas={linhas}
+        aoFechar={() => setImportandoDe(null)}
+        aoPreencher={preencherOrcamento}
+      />
 
       <EditarFornecedor
         fornecedor={editandoFornecedor}

@@ -372,6 +372,7 @@ export async function baixarQuantidadeReposicaoEmMassa(
                   // campo nem vem, e mandar coluna desconhecida derrubava a baixa.
                   ...(itemOriginal.fornecedor_id !== undefined ? { fornecedor_id: itemOriginal.fornecedor_id } : {}),
                   ...(itemOriginal.preco_unitario !== undefined ? { preco_unitario: itemOriginal.preco_unitario } : {}),
+                  ...(itemOriginal.unidade_compra !== undefined ? { unidade_compra: itemOriginal.unidade_compra } : {}),
                   quantidade: subtracao,
                   resolvido: true,
                   resolvido_por: resolvidaPor || null,

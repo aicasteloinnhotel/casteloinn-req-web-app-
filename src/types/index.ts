@@ -130,6 +130,9 @@ export interface ItemReposicao {
   /** Pedido feito pela cotação no app (AJUSTE_08): de quem e por quanto. */
   fornecedor_id?: string | null;
   preco_unitario?: number | null;
+  /** Comprado em outra unidade (AJUSTE_10): em qual e quanto desta linha. */
+  unidade_compra?: string | null;
+  quantidade_compra?: number | null;
   created_at: string;
   item?: Item;
   requisicao?: {

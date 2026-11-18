@@ -1,6 +1,6 @@
 import { supabase } from "@/lib/supabase";
 import { camposDoEstado } from "@/lib/estadoReposicao";
-import type { Fornecedor, PrecoCotado } from "@/lib/cotacao";
+import type { EdicaoDeLinha, Fornecedor, PrecoCotado } from "@/lib/cotacao";
 
 // ---------------------------------------------------------------------------
 //  COTAÇÃO NO APP (AJUSTE_08): fornecedores, preços e o pedido que sai dela.
@@ -158,19 +158,68 @@ export async function escolherFornecedor(lote: string, itemId: string, unidade: 
  * saem da cotação e guardam fornecedor e preço (o histórico de preços).
  */
 export async function fazerPedido(
-  itens: { ids: string[]; preco: number }[],
+  itens: {
+    ids: string[];
+    preco: number;
+    /** Linha editada (outra unidade/quantidade): quanto de cada linha da reposição vai na compra. */
+    compra?: { unidade: string; partes: { id: string; quantidade: number }[] };
+  }[],
   fornecedorId: string,
   prazo: string,
 ) {
   const estado = camposDoEstado("AGUARDANDO", prazo);
-  for (const { ids, preco } of itens) {
-    const { error } = await supabase
-      .from("reposicao_itens")
-      .update({ ...estado, cotacao_lote: null, cotacao_em: null, fornecedor_id: fornecedorId, preco_unitario: preco })
-      .in("id", ids)
-      .eq("resolvido", false);
-    tratar(error);
+  const base = { ...estado, cotacao_lote: null, cotacao_em: null, fornecedor_id: fornecedorId };
+  for (const { ids, preco, compra } of itens) {
+    if (!compra) {
+      const { error } = await supabase
+        .from("reposicao_itens")
+        .update({ ...base, preco_unitario: preco })
+        .in("id", ids)
+        .eq("resolvido", false);
+      tratar(error);
+      continue;
+    }
+    // Comprado em outra unidade: cada linha guarda a unidade e a sua parte da compra.
+    for (const p of compra.partes) {
+      const { error } = await supabase
+        .from("reposicao_itens")
+        .update({ ...base, preco_unitario: preco, unidade_compra: compra.unidade, quantidade_compra: p.quantidade })
+        .eq("id", p.id)
+        .eq("resolvido", false);
+      if (error && ["PGRST204", "42703"].includes(error.code || "")) throw new Error(SEM_AJUSTE_10);
+      tratar(error);
+    }
   }
+}
+
+export const SEM_AJUSTE_10 = "Falta rodar o AJUSTE_10 no Supabase para editar a linha da cotação.";
+
+/** As linhas editadas da cotação. Antes do AJUSTE_10, nenhuma. */
+export async function getLinhasEditadas(lote: string): Promise<EdicaoDeLinha[]> {
+  const { data, error } = await supabase
+    .from("cotacao_linhas")
+    .select("item_id, unidade, nome, marca, unidade_compra, quantidade")
+    .eq("cotacao_lote", lote);
+  if (error && ["42P01", "PGRST205"].includes(error.code || "")) return [];
+  tratar(error);
+  return (data || []).map((l) => ({ ...l, quantidade: l.quantidade == null ? null : Number(l.quantidade) })) as EdicaoDeLinha[];
+}
+
+/** Grava como a linha vai na cotação; null = volta ao original. */
+export async function salvarLinha(
+  lote: string,
+  itemId: string,
+  unidade: string,
+  campos: { nome: string | null; marca: string | null; unidade_compra: string | null; quantidade: number | null } | null,
+) {
+  const r = campos
+    ? await supabase.from("cotacao_linhas").upsert(
+        [{ cotacao_lote: lote, item_id: itemId, unidade, ...campos, updated_at: new Date().toISOString() }],
+        { onConflict: "cotacao_lote,item_id,unidade" },
+      )
+    : await supabase.from("cotacao_linhas").delete().eq("cotacao_lote", lote).eq("item_id", itemId).eq("unidade", unidade);
+  if (r.error && ["42P01", "PGRST205", "PGRST204", "42703"].includes(r.error.code || "")) throw new Error(SEM_AJUSTE_10);
+  tratar(r.error);
 }
 
 /**
@@ -201,15 +250,17 @@ export async function getUltimosPrecos(itemIds: string[]): Promise<Record<string
   if (itemIds.length === 0) return r;
   const { data, error } = await supabase
     .from("reposicao_itens")
-    .select("item_id, preco_unitario, fornecedor_id, unidade, created_at")
+    // "*": antes do AJUSTE_10 não existe unidade_compra.
+    .select("*")
     .in("item_id", itemIds)
     .not("preco_unitario", "is", null)
     .order("created_at", { ascending: false })
     .limit(500);
   tratar(error);
-  for (const l of data || []) {
+  for (const l of (data || []) as any[]) {
     if (!r[l.item_id]) {
-      r[l.item_id] = { preco: Number(l.preco_unitario), fornecedor_id: l.fornecedor_id, unidade: l.unidade, em: l.created_at };
+      // O preço é da unidade em que foi comprado (2 CX), não da necessidade (24 UN).
+      r[l.item_id] = { preco: Number(l.preco_unitario), fornecedor_id: l.fornecedor_id, unidade: l.unidade_compra || l.unidade, em: l.created_at };
     }
   }
   return r;

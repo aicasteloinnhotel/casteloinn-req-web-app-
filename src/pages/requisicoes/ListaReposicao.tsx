@@ -31,7 +31,7 @@ import {
   vencedorDaLinha,
   type Fornecedor,
 } from "@/lib/cotacao";
-import { getDadosDasCotacoes, getFornecedores, limparPedido, type DadosDaCotacao } from "@/services/cotacao";
+import { getDadosDasCotacoes, getFornecedores, getLinhasEditadas, limparPedido, type DadosDaCotacao } from "@/services/cotacao";
 import { GerenciarFornecedores } from "@/components/FornecedoresDialog";
 import { ItemReposicao, Item } from "@/types";
 import { getItens, getUsuarios } from "@/services/api";
@@ -98,6 +98,7 @@ export type GroupedItem = {
   /** Pedido feito pela cotação no app: de quem e por quanto (por unidade). */
   fornecedor_id?: string | null;
   preco_unitario?: number | null;
+  unidade_compra?: string | null;
   /** Valor do pedido deste material (quantidade × preço de cada linha). */
   valor_pedido?: number;
 };
@@ -497,8 +498,11 @@ export default function ListaReposicao() {
       if (item.fornecedor_id && !item.cotacao_lote) {
         group.fornecedor_id = item.fornecedor_id;
         group.preco_unitario = item.preco_unitario ?? null;
+        group.unidade_compra = item.unidade_compra ?? null;
         if (item.preco_unitario != null) {
-          group.valor_pedido = Math.round(((group.valor_pedido || 0) + item.preco_unitario * (item.quantidade || 0)) * 100) / 100;
+          // Comprado em outra unidade (2 CX em vez de 24 UN): vale a quantidade da compra.
+          const qtd = item.quantidade_compra != null ? Number(item.quantidade_compra) : item.quantidade || 0;
+          group.valor_pedido = Math.round(((group.valor_pedido || 0) + item.preco_unitario * qtd) * 100) / 100;
         }
       }
       group.all_ids.push(item.id);
@@ -761,8 +765,10 @@ export default function ListaReposicao() {
   };
 
   /** A lista da cotação para pedir preço no WhatsApp. */
-  const copiarListaDoLote = async (grupos: GroupedItem[]) => {
-    const linhasDoLote = montarLinhas(grupos.flatMap((g) => [...g.manual_items, ...g.rupturas]));
+  const copiarListaDoLote = async (lote: string, grupos: GroupedItem[]) => {
+    // Com as edições da cotação (nome, marca, unidade), igual à tela dela.
+    const edicoes = await getLinhasEditadas(lote).catch(() => []);
+    const linhasDoLote = montarLinhas(grupos.flatMap((g) => [...g.manual_items, ...g.rupturas]), edicoes);
     try {
       await navigator.clipboard.writeText(textoParaPedirPreco(linhasDoLote));
       toast.success("Lista copiada: cole no WhatsApp dos fornecedores.");
@@ -948,7 +954,10 @@ export default function ListaReposicao() {
               {etapa === "AGUARDANDO" && group.preco_unitario != null && (
                 <>
                   <span className="text-slate-300">·</span>
-                  <span className="font-semibold text-slate-700 tabular-nums">{formatarReais(group.preco_unitario)}</span>
+                  <span className="font-semibold text-slate-700 tabular-nums">
+                    {formatarReais(group.preco_unitario)}
+                    {group.unidade_compra ? `/${group.unidade_compra}` : ""}
+                  </span>
                 </>
               )}
             </p>
@@ -1191,7 +1200,7 @@ export default function ListaReposicao() {
                               <Check className="h-3.5 w-3.5 mr-2 text-slate-500" />
                               {marcados === ids.length ? "Desmarcar todos" : "Marcar todos"}
                             </DropdownMenuItem>
-                            <DropdownMenuItem onClick={() => copiarListaDoLote(l.grupos)} className={ITEM_DO_MENU}>
+                            <DropdownMenuItem onClick={() => copiarListaDoLote(l.lote, l.grupos)} className={ITEM_DO_MENU}>
                               <Copy className="h-3.5 w-3.5 mr-2 text-slate-500" /> Copiar lista (WhatsApp)
                             </DropdownMenuItem>
                             <DropdownMenuItem onClick={() => copiarLoteDeNovo(l.grupos)} className={ITEM_DO_MENU}>
