@@ -164,6 +164,8 @@ function CaixaDeMarcar({
  * computador os três ficam lado a lado; no celular aparece o da aba escolhida,
  * e o cabeçalho só fica se tiver o "marcar todos" (a aba já diz o nome).
  */
+const CARTAO_DO_BLOCO = "bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-lg shadow-slate-200/50";
+
 function Bloco({
   titulo, icone, total, visivelNoCelular, marcarTodos, children,
 }: {
@@ -174,10 +176,9 @@ function Bloco({
   marcarTodos?: { marcado: boolean; parcial: boolean; aoMudar: () => void };
   children: React.ReactNode;
 }) {
+  const visivel = `${visivelNoCelular ? "block" : "hidden"} lg:block min-w-0`;
   return (
-    <section
-      className={`${visivelNoCelular ? "block" : "hidden"} lg:block min-w-0 bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-lg shadow-slate-200/50`}
-    >
+    <section className={`${visivel} ${CARTAO_DO_BLOCO}`}>
       <div
         className={`${marcarTodos && total > 0 ? "flex" : "hidden lg:flex"} items-center gap-2.5 pl-4 pr-4 py-2.5 lg:py-3 border-b border-slate-100`}
       >
@@ -1025,23 +1026,28 @@ export default function ListaReposicao() {
                 total={contagem.COTACAO}
                 visivelNoCelular={etapaAtiva === "COTACAO"}
               >
-                {lotesDeCotacao.map((l) => {
+                {/* Uma cotação embaixo da outra, no mesmo cartão, separadas por
+                    uma faixa cinza. A mais antiga primeiro (a que espera resposta
+                    há mais tempo); o número diferencia cópias do mesmo minuto. */}
+                {[...lotesDeCotacao].reverse().map((l, indice) => {
                   const ids = l.grupos.map((g) => g.item_id);
                   const marcados = etapaMarcada === "COTACAO" ? ids.filter((id) => selecionados.has(id)).length : 0;
                   return (
-                    <div key={l.lote}>
-                      {/* Uma cópia para a planilha: o pedido costuma sair junto. */}
-                      <div className="flex items-center gap-2 pl-4 pr-2 py-2 bg-slate-50">
+                    <div key={l.lote} className="border-t-8 first:border-t-0 border-slate-100">
+                      <div className="flex items-center gap-2 pl-4 pr-2 py-2.5 border-b border-slate-100">
                         <CaixaDeMarcar
                           marcado={marcados === ids.length}
                           parcial={marcados > 0}
                           aoMudar={() => alternarVarios(ids, "COTACAO")}
-                          rotulo="Marcar todos desta cópia"
+                          rotulo={`Marcar todos da cotação ${indice + 1}`}
                         />
-                        <p className="flex-1 min-w-0 truncate text-xs font-bold text-slate-600">
-                          {l.em ? `Cópia ${format(new Date(l.em), "dd/MM HH:mm")}` : "Cópia"}
-                          <span className="font-medium text-slate-500"> · {ids.length}</span>
-                        </p>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-bold text-slate-800">Cotação {indice + 1}</p>
+                          <p className="text-[11px] font-medium text-slate-500 tabular-nums truncate">
+                            {l.em ? `${format(new Date(l.em), "dd/MM HH:mm")} · ` : ""}
+                            {contarItens(ids.length)}
+                          </p>
+                        </div>
                         <DropdownMenu>
                           <DropdownMenuTrigger
                             disabled={aplicando}
@@ -1063,7 +1069,7 @@ export default function ListaReposicao() {
                               <Button
                                 variant="ghost"
                                 size="icon"
-                                aria-label="Opções desta cópia"
+                                aria-label={`Opções da cotação ${indice + 1}`}
                                 className="h-8 w-8 shrink-0 text-slate-500 hover:text-slate-800 hover:bg-slate-100"
                               />
                             }
@@ -1080,7 +1086,7 @@ export default function ListaReposicao() {
                           </DropdownMenuContent>
                         </DropdownMenu>
                       </div>
-                      <div className="divide-y divide-slate-100 border-t border-slate-100">
+                      <div className="divide-y divide-slate-100">
                         {l.grupos.map((g) => renderItem(g, "COTACAO"))}
                       </div>
                     </div>

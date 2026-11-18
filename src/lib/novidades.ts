@@ -43,6 +43,18 @@ export const ROTULO_TIPO: Record<TipoMudanca, string> = {
 
 export const VERSOES: Versao[] = [
   {
+    versao: "1.9.1",
+    data: "18/11/2026",
+    titulo: "Cotações separadas",
+    mudancas: [
+      {
+        tipo: "melhoria",
+        publico: "almoxarifado",
+        texto: "Em cotação, cada cotação fica no seu cartão, numerada (Cotação 1, Cotação 2), uma embaixo da outra.",
+      },
+    ],
+  },
+  {
     versao: "1.9",
     data: "18/11/2026",
     titulo: "Lista de Reposição por etapas",
