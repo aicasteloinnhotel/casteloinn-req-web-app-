@@ -11,6 +11,37 @@ export interface Fornecedor {
   id: string;
   nome: string;
   ativo?: boolean;
+  /** Só números, com o 55 do Brasil (AJUSTE_09). */
+  whatsapp?: string | null;
+  /** Valor mínimo do pedido (AJUSTE_09). */
+  pedido_minimo?: number | null;
+}
+
+/**
+ * Número de WhatsApp como o link precisa: só dígitos, com o 55. Aceita
+ * "(31) 99999-8888", "31999998888", "+55 31 9 9999-8888". Curto demais = null.
+ */
+export function normalizarWhatsapp(texto: string | null | undefined): string | null {
+  let d = (texto || "").replace(/\D/g, "");
+  if (d.startsWith("00")) d = d.slice(2);
+  if (d.length === 10 || d.length === 11) d = "55" + d;
+  return d.length >= 12 && d.length <= 13 ? d : null;
+}
+
+/** "(31) 99999-8888" para mostrar. */
+export function whatsappNaTela(numero: string | null | undefined): string {
+  const d = normalizarWhatsapp(numero);
+  if (!d) return "";
+  const local = d.slice(2);
+  const ddd = local.slice(0, 2);
+  const resto = local.slice(2);
+  return `(${ddd}) ${resto.slice(0, resto.length - 4)}-${resto.slice(-4)}`;
+}
+
+/** Link que abre a conversa do fornecedor já com o texto escrito. */
+export function linkWhatsapp(numero: string | null | undefined, texto: string): string | null {
+  const d = normalizarWhatsapp(numero);
+  return d ? `https://wa.me/${d}?text=${encodeURIComponent(texto)}` : null;
 }
 
 export interface PrecoCotado {
@@ -157,6 +188,36 @@ export function pedidosPorFornecedor(
   }
   const pedidos = ordem.filter((id) => porFornecedor.has(id)).map((id) => porFornecedor.get(id)!);
   return { pedidos, semPreco };
+}
+
+/** Quanto falta para o pedido mínimo do fornecedor (0 = atingiu ou não tem mínimo). */
+export function faltaParaMinimo(pedido: PedidoDoFornecedor): number {
+  const minimo = Number(pedido.fornecedor.pedido_minimo) || 0;
+  if (minimo <= 0 || pedido.total >= minimo) return 0;
+  return Math.round((minimo - pedido.total) * 100) / 100;
+}
+
+/**
+ * Para onde a linha pode ir: os outros fornecedores da cotação que têm preço
+ * para ela, do mais barato para o mais caro.
+ */
+export function alternativasDaLinha(
+  precos: PrecoCotado[],
+  linha: Pick<LinhaCotacao, "item_id" | "unidade">,
+  ordemFornecedores: string[],
+  atual: string,
+): { fornecedor_id: string; preco: number }[] {
+  return precos
+    .filter(
+      (p) =>
+        p.item_id === linha.item_id &&
+        p.unidade === linha.unidade &&
+        p.preco != null &&
+        p.fornecedor_id !== atual &&
+        ordemFornecedores.includes(p.fornecedor_id),
+    )
+    .map((p) => ({ fornecedor_id: p.fornecedor_id, preco: p.preco! }))
+    .sort((a, b) => a.preco - b.preco || ordemFornecedores.indexOf(a.fornecedor_id) - ordemFornecedores.indexOf(b.fornecedor_id));
 }
 
 /** Lista para pedir preço aos fornecedores pelo WhatsApp. */

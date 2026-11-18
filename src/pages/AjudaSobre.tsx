@@ -523,16 +523,22 @@ export default function AjudaSobre() {
                   </p>
                   <p>
                     Para cotar, marque os itens em A comprar e toque em <strong>Nova cotação</strong>.
-                    A cotação abre: escolha os fornecedores, toque em <strong>Copiar lista</strong> e
-                    mande no WhatsApp deles. Conforme os preços chegam, digite cada um (no celular,
-                    um fornecedor por vez). O menor preço fica verde; para levar de outro, troque em{" "}
-                    <strong>Leva</strong> (no computador).
+                    A cotação abre: escolha os fornecedores e, no nome de cada um, toque em{" "}
+                    <strong>Pedir preço no WhatsApp</strong> (abre a conversa com a lista escrita).
+                    Conforme os preços chegam, digite cada um (no celular, um fornecedor por vez). O
+                    menor preço fica verde.
                   </p>
                   <p>
-                    Embaixo aparece o pedido de cada fornecedor, com o total. Toque no ícone de copiar
-                    para mandar o pedido no WhatsApp dele e, depois, em <strong>Pedido feito</strong>{" "}
-                    com a previsão de chegada. Os itens vão para Aguardando, agrupados por fornecedor,
-                    e o preço fica guardado: na próxima cotação aparece a última compra.
+                    Embaixo aparece o pedido de cada fornecedor, com o total. Para levar um item de
+                    outro fornecedor, toque no <strong>⇄</strong> ao lado dele. Pedido abaixo do
+                    mínimo fica amarelo: <strong>Passar para outros</strong> manda cada item para o
+                    próximo mais barato. O ícone do WhatsApp abre a conversa com o pedido escrito;
+                    depois toque em <strong>Pedido feito</strong> com a previsão de chegada. O preço
+                    fica guardado: na próxima cotação aparece a última compra.
+                  </p>
+                  <p>
+                    WhatsApp, pedido mínimo e excluir fornecedor: no ícone de loja da Lista de
+                    Reposição, ou no nome do fornecedor dentro da cotação.
                   </p>
                   <p>
                     <strong>Urgente</strong> é uma marca, não uma etapa: o item fica em vermelho no

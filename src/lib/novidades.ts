@@ -43,6 +43,30 @@ export const ROTULO_TIPO: Record<TipoMudanca, string> = {
 
 export const VERSOES: Versao[] = [
   {
+    versao: "1.11",
+    data: "18/11/2026",
+    titulo: "Fornecedores com WhatsApp e pedido mínimo",
+    mudancas: [
+      {
+        tipo: "novo",
+        publico: "almoxarifado",
+        texto:
+          "Cadastre o WhatsApp do fornecedor: o app abre a conversa direto, já com a lista para pedir preço ou com o pedido escrito.",
+      },
+      {
+        tipo: "novo",
+        publico: "almoxarifado",
+        texto:
+          "Pedido mínimo: o pedido que não alcança fica amarelo, diz quanto falta e passa os itens para os outros fornecedores num toque.",
+      },
+      {
+        tipo: "melhoria",
+        publico: "almoxarifado",
+        texto: "Cada item do pedido troca de fornecedor pelo ⇄, também no celular. Fornecedores: cadastrar, editar e excluir pela Lista de Reposição.",
+      },
+    ],
+  },
+  {
     versao: "1.10",
     data: "18/11/2026",
     titulo: "Cotação dentro do app",

@@ -16,24 +16,67 @@ const tratar = (error: { code?: string; message: string } | null) => {
   throw new Error(error.message);
 };
 
+/** Todos, inclusive os excluídos (ativo = falso): a cotação antiga ainda mostra o nome. */
 export async function getFornecedores(): Promise<Fornecedor[]> {
-  const { data, error } = await supabase.from("fornecedores").select("id, nome, ativo").order("nome");
+  // "*": funciona antes e depois do AJUSTE_09 (WhatsApp e mínimo).
+  const { data, error } = await supabase.from("fornecedores").select("*").order("nome");
   tratar(error);
-  return (data || []) as Fornecedor[];
+  return ((data || []) as Fornecedor[]).map((f) => ({
+    ...f,
+    pedido_minimo: f.pedido_minimo == null ? null : Number(f.pedido_minimo),
+  }));
 }
 
-/** Cadastra; se o nome já existe (mesmo com outra caixa/espaço), devolve o que existe. */
+const nomeLimpo = (nome: string) => nome.trim().replace(/\s+/g, " ").toUpperCase();
+
+/**
+ * Cadastra; se o nome já existe (mesmo com outra caixa/espaço), devolve o que
+ * existe — e, se tinha sido excluído, volta a valer.
+ */
 export async function criarFornecedor(nome: string): Promise<Fornecedor> {
-  const limpo = nome.trim().replace(/\s+/g, " ").toUpperCase();
+  const limpo = nomeLimpo(nome);
   if (!limpo) throw new Error("Digite o nome do fornecedor.");
-  const { data, error } = await supabase.from("fornecedores").insert([{ nome: limpo }]).select("id, nome, ativo").single();
+  const { data, error } = await supabase.from("fornecedores").insert([{ nome: limpo }]).select("*").single();
   if (error?.code === "23505") {
     const todos = await getFornecedores();
     const existente = todos.find((f) => f.nome.trim().toUpperCase() === limpo);
-    if (existente) return existente;
+    if (existente) {
+      if (existente.ativo === false) {
+        const volta = await supabase.from("fornecedores").update({ ativo: true }).eq("id", existente.id);
+        tratar(volta.error);
+      }
+      return { ...existente, ativo: true };
+    }
   }
   tratar(error);
   return data as Fornecedor;
+}
+
+export const SEM_AJUSTE_09 = "Falta rodar o AJUSTE_09 no Supabase para guardar WhatsApp e pedido mínimo.";
+
+/** Nome, WhatsApp e pedido mínimo. */
+export async function atualizarFornecedor(
+  id: string,
+  campos: { nome: string; whatsapp: string | null; pedido_minimo: number | null },
+) {
+  const nome = nomeLimpo(campos.nome);
+  if (!nome) throw new Error("Digite o nome do fornecedor.");
+  const { error } = await supabase
+    .from("fornecedores")
+    .update({ nome, whatsapp: campos.whatsapp, pedido_minimo: campos.pedido_minimo })
+    .eq("id", id);
+  if (error?.code === "23505") throw new Error(`Já existe um fornecedor chamado ${nome}.`);
+  if (error && ["PGRST204", "42703"].includes(error.code || "")) throw new Error(SEM_AJUSTE_09);
+  tratar(error);
+}
+
+/**
+ * Excluir = esconder (ativo = falso). Some das listas para incluir, mas o
+ * histórico de preços e os pedidos antigos continuam com o nome dele.
+ */
+export async function excluirFornecedor(id: string) {
+  const { error } = await supabase.from("fornecedores").update({ ativo: false }).eq("id", id);
+  tratar(error);
 }
 
 export interface DadosDaCotacao {

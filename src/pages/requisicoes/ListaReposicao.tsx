@@ -32,6 +32,7 @@ import {
   type Fornecedor,
 } from "@/lib/cotacao";
 import { getDadosDasCotacoes, getFornecedores, limparPedido, type DadosDaCotacao } from "@/services/cotacao";
+import { GerenciarFornecedores } from "@/components/FornecedoresDialog";
 import { ItemReposicao, Item } from "@/types";
 import { getItens, getUsuarios } from "@/services/api";
 import { Button } from "@/components/ui/button";
@@ -64,6 +65,7 @@ import {
   ChevronDown,
   MoreHorizontal,
   ShoppingCart,
+  Store,
   Pencil,
   Trash2,
   FileSpreadsheet,
@@ -553,6 +555,7 @@ export default function ListaReposicao() {
   // Cotação no app (AJUSTE_08): fornecedores e preços de cada cotação aberta,
   // para mostrar o melhor preço em cada item. Sem o ajuste, só não aparece.
   const [fornecedores, setFornecedores] = useState<Fornecedor[]>([]);
+  const [gerenciandoFornecedores, setGerenciandoFornecedores] = useState(false);
   const [dadosCotacoes, setDadosCotacoes] = useState<Record<string, DadosDaCotacao>>({});
   const chaveDosLotes = groupedItems.map((g) => g.lote).filter(Boolean).sort().join(",");
   useEffect(() => {
@@ -1057,6 +1060,15 @@ export default function ListaReposicao() {
               <Printer className="w-4 h-4" />
             </Button>
             <Button
+              onClick={() => setGerenciandoFornecedores(true)}
+              variant="outline"
+              title="Fornecedores"
+              aria-label="Fornecedores"
+              className={BOTAO_ICONE}
+            >
+              <Store className="w-4 h-4" />
+            </Button>
+            <Button
               onClick={() => setShowHistoryModal(true)}
               variant="outline"
               title="Histórico de baixas"
@@ -1313,6 +1325,14 @@ export default function ListaReposicao() {
           </div>
         )}
       </div>
+
+      <GerenciarFornecedores
+        aberto={gerenciandoFornecedores}
+        aoFechar={() => {
+          setGerenciandoFornecedores(false);
+          getFornecedores().then(setFornecedores).catch(() => {});
+        }}
+      />
 
       {/* MODAL HISTÓRICO DE BAIXAS */}
       <Dialog open={showHistoryModal} onOpenChange={setShowHistoryModal}>
