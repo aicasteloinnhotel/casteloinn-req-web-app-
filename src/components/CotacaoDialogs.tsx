@@ -136,24 +136,30 @@ export function EditarLinhaCotacao({
 }
 
 /**
- * Importar o orçamento de um fornecedor: arquivo .csv (ou texto colado). Mostra
- * o que foi achado antes de preencher; o que não foi achado dá para escolher.
+ * Importar o orçamento de um fornecedor. O orçamento chega em foto ou PDF; vira
+ * texto .csv (produto e preço) e é colado aqui — ou vem como arquivo. Mostra o
+ * que foi achado antes de preencher; o que não foi achado dá para escolher.
  */
 export function ImportarOrcamento({
-  fornecedor, linhas, aoFechar, aoPreencher,
+  aberto, fornecedores, inicial, linhas, aoFechar, aoPreencher,
 }: {
-  fornecedor: Fornecedor | null;
+  aberto: boolean;
+  fornecedores: Fornecedor[];
+  inicial: string | null;
   linhas: LinhaCotacao[];
   aoFechar: () => void;
   aoPreencher: (fornecedor: Fornecedor, itens: { chave: string; preco: number }[]) => Promise<void>;
 }) {
+  const [fornecedorId, setFornecedorId] = useState("");
   const [texto, setTexto] = useState("");
   const [escolhas, setEscolhas] = useState<Record<number, string>>({});
   const [preenchendo, setPreenchendo] = useState(false);
+  const fornecedor = fornecedores.find((f) => f.id === fornecedorId) ?? null;
 
   useEffect(() => {
-    if (fornecedor) { setTexto(""); setEscolhas({}); }
-  }, [fornecedor]);
+    if (aberto) { setTexto(""); setEscolhas({}); setFornecedorId(inicial || fornecedores[0]?.id || ""); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [aberto]);
 
   const { linhas: orcamento, ignoradas } = useMemo(() => lerOrcamento(texto), [texto]);
   const casadas: Correspondencia[] = useMemo(() => casarOrcamento(orcamento, linhas), [orcamento, linhas]);
@@ -189,27 +195,40 @@ export function ImportarOrcamento({
   };
 
   return (
-    <Dialog open={!!fornecedor} onOpenChange={(o) => { if (!o) aoFechar(); }}>
+    <Dialog open={aberto} onOpenChange={(o) => { if (!o) aoFechar(); }}>
       <DialogContent className="sm:max-w-2xl max-h-[90vh] flex flex-col">
         <DialogHeader>
-          <DialogTitle>Orçamento da {fornecedor?.nome}</DialogTitle>
-          <DialogDescription>
-            Arquivo .csv com o produto e o preço (o modelo da cotação serve), ou cole o texto.
-          </DialogDescription>
+          <DialogTitle>Importar orçamento</DialogTitle>
+          <DialogDescription className="sr-only">Escolha o fornecedor e cole o orçamento em .csv.</DialogDescription>
         </DialogHeader>
-        <div className="flex flex-col sm:flex-row gap-2">
-          <label className="inline-flex items-center justify-center gap-2 h-11 px-4 rounded-lg border border-slate-200 bg-white text-sm font-bold text-slate-700 hover:bg-slate-50 cursor-pointer shrink-0">
-            <FileUp className="h-4 w-4" /> Escolher arquivo
-            <input type="file" accept=".csv,.txt,text/csv,text/plain" className="sr-only" onChange={(e) => lerArquivo(e.target.files?.[0])} />
-          </label>
+        <div>
+          <label htmlFor="orc-fornecedor" className={ROTULO}>Fornecedor</label>
+          <select
+            id="orc-fornecedor"
+            value={fornecedorId}
+            onChange={(e) => setFornecedorId(e.target.value)}
+            className={`${SELETOR} w-full`}
+          >
+            {fornecedores.map((f) => (
+              <option key={f.id} value={f.id}>{f.nome}</option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label htmlFor="orc-texto" className={ROTULO}>Orçamento (.csv)</label>
           <textarea
+            id="orc-texto"
             value={texto}
             onChange={(e) => { setTexto(e.target.value); setEscolhas({}); }}
-            rows={2}
-            placeholder={"ou cole aqui, por exemplo:\nAçúcar refinado;4,10"}
+            rows={orcamento.length > 0 ? 2 : 5}
+            placeholder={"Cole aqui. Exemplo:\nProduto;Preço\nCHOC NESTLE SUFLAIR 50GR;82,15"}
             aria-label="Texto do orçamento"
-            className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-white p-2.5 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-teal-500 resize-y"
+            className="w-full rounded-lg border border-slate-200 bg-white p-2.5 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-teal-500 resize-y"
           />
+          <label className="mt-1 inline-flex items-center gap-1.5 text-xs font-bold text-teal-700 hover:underline cursor-pointer">
+            <FileUp className="h-3.5 w-3.5" /> ou escolher o arquivo .csv
+            <input type="file" accept=".csv,.txt,text/csv,text/plain" className="sr-only" onChange={(e) => lerArquivo(e.target.files?.[0])} />
+          </label>
         </div>
 
         {orcamento.length > 0 && (
@@ -248,7 +267,7 @@ export function ImportarOrcamento({
           <Button variant="outline" onClick={aoFechar} className="h-10 font-bold">Cancelar</Button>
           <Button
             onClick={preencher}
-            disabled={preenchendo || prontas.length === 0}
+            disabled={preenchendo || prontas.length === 0 || !fornecedor}
             className="h-10 px-4 bg-teal-600 hover:bg-teal-700 text-white font-bold"
           >
             {preenchendo ? "Preenchendo..." : `Preencher ${prontas.length} ${prontas.length === 1 ? "preço" : "preços"}`}

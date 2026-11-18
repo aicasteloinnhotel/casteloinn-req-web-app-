@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { format } from "date-fns";
-import { ArrowLeft, ArrowRightLeft, Check, ChevronDown, Copy, Download, FileUp, MessageCircle, Pencil, Plus, Truck, X } from "lucide-react";
+import { ArrowLeft, ArrowRightLeft, Check, ChevronDown, Copy, FileUp, MessageCircle, Pencil, Plus, Truck, X } from "lucide-react";
 import { EditarFornecedor } from "@/components/FornecedoresDialog";
 import { EditarLinhaCotacao, ImportarOrcamento } from "@/components/CotacaoDialogs";
 import { Button } from "@/components/ui/button";
@@ -24,7 +24,6 @@ import {
   type UltimoPreco,
 } from "@/services/cotacao";
 import {
-  csvModelo,
   partesDaCompra,
   type EdicaoDeLinha,
   alternativasDaLinha,
@@ -45,7 +44,7 @@ import {
 } from "@/lib/cotacao";
 import { PRAZOS_AGUARDANDO, type FotoDeEstado } from "@/lib/estadoReposicao";
 import { formatarQtd } from "@/lib/unidades";
-import { ABA_ATIVA, ABA_FILA, ABA_INATIVA, ABAS_FILA, BOTAO_SECUNDARIO, CAMPO, TITULO } from "@/lib/estilos";
+import { ABA_ATIVA, ABA_FILA, ABA_INATIVA, ABAS_FILA, CAMPO, TITULO } from "@/lib/estilos";
 import type { ItemReposicao } from "@/types";
 
 const CARTAO = "bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-lg shadow-slate-200/50";
@@ -131,7 +130,7 @@ export default function CotacaoReposicao() {
   const [aplicando, setAplicando] = useState(false);
   const [edicoes, setEdicoes] = useState<EdicaoDeLinha[]>([]);
   const [editandoLinha, setEditandoLinha] = useState<LinhaCotacao | null>(null);
-  const [importandoDe, setImportandoDe] = useState<Fornecedor | null>(null);
+  const [importando, setImportando] = useState(false);
 
   const carregar = useCallback(async (mostrar = true) => {
     if (mostrar) setCarregando(true);
@@ -284,22 +283,9 @@ export default function CotacaoReposicao() {
       await gravarPreco(linha, fornecedor.id, preco);
       feitos++;
     }
-    setImportandoDe(null);
+    setImportando(false);
     setFornecedorAtivo(fornecedor.id);
     toast.success(`${feitos} ${feitos === 1 ? "preço preenchido" : "preços preenchidos"} na ${fornecedor.nome}.`);
-  };
-
-  /** O modelo .csv da cotação, para o fornecedor preencher (ou para importar depois). */
-  const baixarModelo = () => {
-    const blob = new Blob(["﻿" + csvModelo(linhas)], { type: "text/csv;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `cotacao-${numero}.csv`;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
 
   /** Abre a conversa do fornecedor com o texto escrito; sem número, copia. */
@@ -470,24 +456,6 @@ export default function CotacaoReposicao() {
             {semPreco.length > 0 && semPreco.length < linhas.length && ` · ${semPreco.length} sem preço`}
           </p>
         </div>
-        {/* No celular os botões vão para a linha de baixo, cada um com metade. */}
-        <div className="flex items-center gap-2 w-full sm:w-auto">
-          <Button
-            variant="outline"
-            onClick={baixarModelo}
-            title="Planilha da cotação para o fornecedor preencher e você importar depois"
-            className={`${BOTAO_SECUNDARIO} flex-1 sm:flex-none`}
-          >
-            <Download className="h-4 w-4" /> Modelo .csv
-          </Button>
-          <Button
-            variant="outline"
-            onClick={() => copiar(textoParaPedirPreco(linhas), "Lista copiada: cole no WhatsApp dos fornecedores.")}
-            className={`${BOTAO_SECUNDARIO} flex-1 sm:flex-none`}
-          >
-            <Copy className="h-4 w-4" /> Copiar lista
-          </Button>
-        </div>
       </div>
 
       {/* Fornecedores da cotação */}
@@ -515,9 +483,6 @@ export default function CotacaoReposicao() {
                 <DropdownMenuItem onClick={() => abrirWhatsapp(f, textoParaPedirPreco(linhas))} className={ITEM_DO_MENU}>
                   <MessageCircle className="h-3.5 w-3.5 mr-2 text-slate-500" />
                   {f.whatsapp ? "Pedir preço no WhatsApp" : "Copiar lista (sem WhatsApp)"}
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => setImportandoDe(f)} className={ITEM_DO_MENU}>
-                  <FileUp className="h-3.5 w-3.5 mr-2 text-slate-500" /> Importar orçamento (.csv)
                 </DropdownMenuItem>
                 <DropdownMenuItem onClick={() => setEditandoFornecedor(f)} className={ITEM_DO_MENU}>
                   <Pencil className="h-3.5 w-3.5 mr-2 text-slate-500" /> WhatsApp e pedido mínimo
@@ -555,7 +520,17 @@ export default function CotacaoReposicao() {
         <>
           {/* PREÇOS — computador: a tabela inteira, como a planilha. */}
           <section className="space-y-2">
-            <h2 className={TITULO_DE_GRUPO}>Preços</h2>
+            {/* O orçamento que chega em foto ou PDF: vira .csv e entra aqui, num lugar só. */}
+            <div className="flex items-end justify-between gap-2">
+              <h2 className={TITULO_DE_GRUPO}>Preços</h2>
+              <Button
+                variant="outline"
+                onClick={() => setImportando(true)}
+                className="h-9 px-3 font-bold text-teal-700 border-teal-200 bg-white hover:bg-teal-50 shadow-none"
+              >
+                <FileUp className="h-4 w-4" /> Importar orçamento
+              </Button>
+            </div>
 
             <div className={`${CARTAO} hidden lg:block`}>
               <div className="overflow-x-auto">
@@ -867,9 +842,11 @@ export default function CotacaoReposicao() {
 
       <EditarLinhaCotacao linha={editandoLinha} aoFechar={() => setEditandoLinha(null)} aoSalvar={gravarLinha} />
       <ImportarOrcamento
-        fornecedor={importandoDe}
+        aberto={importando}
+        fornecedores={fornecedoresDaCotacao}
+        inicial={ativo?.id ?? null}
         linhas={linhas}
-        aoFechar={() => setImportandoDe(null)}
+        aoFechar={() => setImportando(false)}
         aoPreencher={preencherOrcamento}
       />
 

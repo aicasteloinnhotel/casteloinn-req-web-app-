@@ -43,6 +43,19 @@ export const ROTULO_TIPO: Record<TipoMudanca, string> = {
 
 export const VERSOES: Versao[] = [
   {
+    versao: "1.12.1",
+    data: "18/11/2026",
+    titulo: "Importar orçamento mais simples",
+    mudancas: [
+      {
+        tipo: "melhoria",
+        publico: "almoxarifado",
+        texto:
+          "Um botão só, “Importar orçamento”, ao lado de Preços: escolha o fornecedor e cole. Acha o produto mesmo com nome abreviado (CHOC = CHOCOLATE) e entende preço com ponto ou vírgula.",
+      },
+    ],
+  },
+  {
     versao: "1.12",
     data: "18/11/2026",
     titulo: "Editar itens e importar orçamento na cotação",

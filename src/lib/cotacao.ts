@@ -164,10 +164,24 @@ export const descricaoDaLinha = (l: Pick<LinhaCotacao, "nome" | "marca">) => (l.
  * Vazio = null (sem preço). Texto que não é número = undefined (inválido).
  */
 export function lerPreco(texto: string): number | null | undefined {
-  let t = (texto || "").replace(/r\$/i, "").replace(/\s/g, "");
+  // Tira R$, US$, $ e espaços. Sistema de fornecedor às vezes sai em formato
+  // americano ("$2,006.11"): com vírgula E ponto, o que vem por último é o decimal.
+  let t = (texto || "").replace(/(r|us)?\$/gi, "").replace(/\s/g, "");
   if (!t) return null;
-  if (t.includes(",")) t = t.replace(/\./g, "").replace(",", ".");
-  else if ((t.match(/\./g) || []).length > 1) t = t.replace(/\./g, "");
+  const temVirgula = t.includes(",");
+  const temPonto = t.includes(".");
+  if (temVirgula && temPonto) {
+    t = t.lastIndexOf(",") > t.lastIndexOf(".") ? t.replace(/\./g, "").replace(",", ".") : t.replace(/,/g, "");
+  } else if (temVirgula) {
+    // Várias vírgulas só valem como milhar de 3 dígitos ("1,234,567").
+    if ((t.match(/,/g) || []).length > 1) {
+      if (!/^\d{1,3}(,\d{3})+$/.test(t)) return undefined;
+      t = t.replace(/,/g, "");
+    } else t = t.replace(",", ".");
+  } else if ((t.match(/\./g) || []).length > 1) {
+    if (!/^\d{1,3}(\.\d{3})+$/.test(t)) return undefined;
+    t = t.replace(/\./g, "");
+  }
   if (!/^\d+(\.\d+)?$/.test(t)) return undefined;
   return Math.round(Number(t) * 100) / 100;
 }
@@ -311,15 +325,6 @@ const semAcento = (t: string) => t.normalize("NFD").replace(/[̀-ͯ]/g, "");
 export const nomeParaComparar = (t: string) =>
   semAcento(t || "").toUpperCase().replace(/[^A-Z0-9]+/g, " ").trim();
 
-/** O modelo .csv da cotação (abre no Excel): uma linha por item, preço em branco. */
-export function csvModelo(linhas: LinhaCotacao[]): string {
-  const campo = (t: string) => (/[;"\n]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t);
-  return [
-    "Produto;Marca;Unidade;Quantidade;Preço",
-    ...linhas.map((l) => [campo(l.nome), campo(l.marca), l.unidadeCompra, formatarQtd(l.quantidade), ""].join(";")),
-  ].join("\r\n");
-}
-
 /** Divide uma linha de .csv respeitando aspas ("a;b" é um campo só). */
 function dividir(linha: string, sep: string): string[] {
   const campos: string[] = [];
@@ -379,17 +384,61 @@ export function lerOrcamento(texto: string): { linhas: LinhaDoOrcamento[]; ignor
 }
 
 /** Quão parecido é o nome do orçamento com o da linha: 3 igual, 2 um contém o outro, 1 palavras em comum. */
+/** Palavras que não ajudam a achar o produto. */
+const PALAVRAS_SOLTAS = new Set(["DE", "DA", "DO", "DAS", "DOS", "AO", "A", "O", "E", "COM", "C", "P", "PARA", "EM", "UN", "UND"]);
+
+const palavrasDe = (t: string) =>
+  nomeParaComparar(t)
+    .split(" ")
+    .filter((p) => p && !PALAVRAS_SOLTAS.has(p))
+    // "50GR" e "50G", "1LT" e "1L" contam como a mesma medida.
+    .map((p) => p.replace(/^(\d+)(GR|GRS)$/, "$1G").replace(/^(\d+)(LT|LTS)$/, "$1L"));
+
+/** Quantas letras é preciso trocar para uma palavra virar a outra. */
+function distancia(a: string, b: string): number {
+  const d = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array(b.length).fill(0)]);
+  for (let j = 1; j <= b.length; j++) d[0][j] = j;
+  for (let i = 1; i <= a.length; i++)
+    for (let j = 1; j <= b.length; j++)
+      d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+  return d[a.length][b.length];
+}
+
+/**
+ * A palavra do orçamento vale pela do cadastro: igual, abreviada ("CHOC" =
+ * "CHOCOLATE") ou com uma letra de diferença ("CHANTILY" = "CHANTILLY").
+ * Número tem de ser igual: "AA" não é "AAA", "50G" não é "500G".
+ */
+function mesmaPalavra(a: string, b: string): boolean {
+  if (a === b) return true;
+  if (/\d/.test(a) || /\d/.test(b)) return false;
+  if (Math.min(a.length, b.length) >= 3 && (a.startsWith(b) || b.startsWith(a))) return true;
+  return Math.min(a.length, b.length) >= 5 && distancia(a, b) <= 1;
+}
+
+/**
+ * Quão parecido é o nome do orçamento com o da cotação: 3 igual, 2 um contém o
+ * outro, e abaixo disso a fração das palavras do nome MENOR que aparecem no
+ * outro (aceitando abreviação). Fornecedor escreve "CHOC NESTLE SUFLAIR 50GR AO
+ * LEITE" para o nosso "CHOCOLATE SUFLAIR 50G": as 3 palavras do nosso aparecem.
+ */
 function semelhanca(a: string, b: string): number {
   const x = nomeParaComparar(a);
   const y = nomeParaComparar(b);
   if (!x || !y) return 0;
   if (x === y) return 3;
   if (x.includes(y) || y.includes(x)) return 2;
-  const px = x.split(" ").filter((p) => p.length > 1);
-  const py = new Set(y.split(" ").filter((p) => p.length > 1));
-  const comuns = px.filter((p) => py.has(p)).length;
-  const menor = Math.min(px.length, py.size) || 1;
-  return comuns / menor >= 0.6 ? 1 : 0;
+  const pa = palavrasDe(a);
+  const pb = palavrasDe(b);
+  if (pa.length === 0 || pb.length === 0) return 0;
+  const [menor, maior] = pa.length <= pb.length ? [pa, pb] : [pb, pa];
+  const achadas = menor.filter((p) => maior.some((q) => mesmaPalavra(p, q))).length;
+  const fracao = achadas / menor.length;
+  // Uma palavra só em comum não basta, e 3 de 4 é o mínimo: com menos,
+  // "REFRESCO TANG LIMÃO" acharia o "REFRESCO TANG LARANJA". O que não for
+  // achado a pessoa escolhe na prévia.
+  if (achadas < Math.min(2, menor.length)) return 0;
+  return fracao >= 0.75 ? Math.round(fracao * 100) / 100 : 0;
 }
 
 export interface Correspondencia {

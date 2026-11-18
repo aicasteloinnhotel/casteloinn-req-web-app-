@@ -542,10 +542,10 @@ export default function AjudaSobre() {
                     cadastro não muda.
                   </p>
                   <p>
-                    Orçamento em arquivo: no nome do fornecedor, <strong>Importar orçamento (.csv)</strong>.
-                    O app acha cada produto pelo nome e mostra antes de preencher; o que não achou dá
-                    para escolher na lista. <strong>Modelo .csv</strong> baixa a planilha da cotação
-                    (Produto, Marca, Unidade, Quantidade, Preço) para o fornecedor preencher.
+                    Orçamento que chega em foto ou PDF: transforme em texto .csv (produto e preço) e
+                    toque em <strong>Importar orçamento</strong>, ao lado de Preços. Escolha o
+                    fornecedor e cole. O app acha cada produto pelo nome, mesmo abreviado, e mostra
+                    antes de preencher; o que não achou dá para escolher na lista.
                   </p>
                   <p>
                     WhatsApp, pedido mínimo e excluir fornecedor: no ícone de loja da Lista de
