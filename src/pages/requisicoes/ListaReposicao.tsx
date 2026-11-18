@@ -24,6 +24,14 @@ import {
   type ModalidadeReposicao,
 } from "@/lib/estadoReposicao";
 import { Checkbox } from "@/components/ui/checkbox";
+import {
+  formatarReais,
+  montarLinhas,
+  textoParaPedirPreco,
+  vencedorDaLinha,
+  type Fornecedor,
+} from "@/lib/cotacao";
+import { getDadosDasCotacoes, getFornecedores, limparPedido, type DadosDaCotacao } from "@/services/cotacao";
 import { ItemReposicao, Item } from "@/types";
 import { getItens, getUsuarios } from "@/services/api";
 import { Button } from "@/components/ui/button";
@@ -85,6 +93,11 @@ export type GroupedItem = {
   /** Em cotação: qual cópia para a planilha, e quando. */
   lote?: string | null;
   cotacao_em?: string | null;
+  /** Pedido feito pela cotação no app: de quem e por quanto (por unidade). */
+  fornecedor_id?: string | null;
+  preco_unitario?: number | null;
+  /** Valor do pedido deste material (quantidade × preço de cada linha). */
+  valor_pedido?: number;
 };
 
 /** "1 item", "3 itens". */
@@ -166,6 +179,22 @@ function CaixaDeMarcar({
  */
 const CARTAO_DO_BLOCO = "bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-lg shadow-slate-200/50";
 
+/**
+ * "Marcar todos" em texto, não em bolinha: a bolinha é do item. Com a mesma
+ * bolinha no título, o cabeçalho parecia mais um item da lista.
+ */
+function MarcarTodos({ todos, aoMudar }: { todos: boolean; aoMudar: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={aoMudar}
+      className="shrink-0 h-8 px-2 -mr-1 rounded-md text-xs font-bold text-teal-700 hover:bg-teal-50"
+    >
+      {todos ? "Desmarcar" : "Marcar todos"}
+    </button>
+  );
+}
+
 function Bloco({
   titulo, icone, total, visivelNoCelular, marcarTodos, children,
 }: {
@@ -179,23 +208,22 @@ function Bloco({
   const visivel = `${visivelNoCelular ? "block" : "hidden"} lg:block min-w-0`;
   return (
     <section className={`${visivel} ${CARTAO_DO_BLOCO}`}>
+      {/* Cabeçalho do bloco: ícone, nome maior e contagem; nada de bolinha. */}
       <div
-        className={`${marcarTodos && total > 0 ? "flex" : "hidden lg:flex"} items-center gap-2.5 pl-4 pr-4 py-2.5 lg:py-3 border-b border-slate-100`}
+        className={`${marcarTodos && total > 0 ? "flex" : "hidden lg:flex"} items-center gap-2.5 px-4 py-2 lg:py-3 bg-slate-50 border-b border-slate-200`}
       >
-        {marcarTodos && total > 0 && (
-          <CaixaDeMarcar
-            marcado={marcarTodos.marcado}
-            parcial={marcarTodos.parcial}
-            aoMudar={marcarTodos.aoMudar}
-            rotulo={`Marcar todos de ${titulo}`}
-          />
-        )}
-        <span className="lg:hidden text-sm font-semibold text-slate-600">Marcar todos</span>
-        <span className="hidden lg:flex w-8 h-8 rounded-lg bg-teal-50 text-teal-700 items-center justify-center shrink-0 [&_svg]:w-4 [&_svg]:h-4">
+        <span className="hidden lg:flex w-8 h-8 rounded-lg bg-teal-100 text-teal-800 items-center justify-center shrink-0 [&_svg]:w-4 [&_svg]:h-4">
           {icone}
         </span>
-        <h2 className="hidden lg:block text-sm font-bold text-slate-800 truncate">{titulo}</h2>
-        <span className="hidden lg:block ml-auto text-xs font-bold text-slate-500 tabular-nums">{total}</span>
+        <h2 className="hidden lg:block text-base font-bold text-slate-900 truncate">{titulo}</h2>
+        <span className="hidden lg:inline-flex rounded-full bg-white border border-slate-200 px-2 py-0.5 text-xs font-bold text-slate-600 tabular-nums">
+          {total}
+        </span>
+        {marcarTodos && total > 0 && (
+          <span className="ml-auto">
+            <MarcarTodos todos={marcarTodos.marcado} aoMudar={marcarTodos.aoMudar} />
+          </span>
+        )}
       </div>
       {total === 0 ? (
         <p className="px-4 py-8 text-center text-sm text-slate-500">Nada aqui.</p>
@@ -353,7 +381,11 @@ export default function ListaReposicao() {
   const voltarParaComprar = (itemIds: string[], etapa: EtapaReposicao) =>
     aplicar(
       itemIds,
-      () => (etapa === "COTACAO" ? tirarDaCotacao(itemIds) : definirEstadoDosItens(itemIds, "NORMAL")),
+      async () => {
+        if (etapa === "COTACAO") return tirarDaCotacao(itemIds);
+        await definirEstadoDosItens(itemIds, "NORMAL");
+        await limparPedido(itemIds); // o pedido foi desfeito: sem fornecedor e preço
+      },
       `${contarItens(itemIds.length)} de volta em A comprar.`,
     );
 
@@ -460,6 +492,13 @@ export default function ListaReposicao() {
         group.lote = item.cotacao_lote;
         group.cotacao_em = item.cotacao_em;
       }
+      if (item.fornecedor_id && !item.cotacao_lote) {
+        group.fornecedor_id = item.fornecedor_id;
+        group.preco_unitario = item.preco_unitario ?? null;
+        if (item.preco_unitario != null) {
+          group.valor_pedido = Math.round(((group.valor_pedido || 0) + item.preco_unitario * (item.quantidade || 0)) * 100) / 100;
+        }
+      }
       group.all_ids.push(item.id);
       group.total_quantidade += (item.quantidade || 1);
       
@@ -510,6 +549,45 @@ export default function ListaReposicao() {
   }, [displayedItems]);
 
   const lotesDeCotacao = useMemo(() => separarEmLotes(porEtapa.COTACAO), [porEtapa]);
+
+  // Cotação no app (AJUSTE_08): fornecedores e preços de cada cotação aberta,
+  // para mostrar o melhor preço em cada item. Sem o ajuste, só não aparece.
+  const [fornecedores, setFornecedores] = useState<Fornecedor[]>([]);
+  const [dadosCotacoes, setDadosCotacoes] = useState<Record<string, DadosDaCotacao>>({});
+  const chaveDosLotes = groupedItems.map((g) => g.lote).filter(Boolean).sort().join(",");
+  useEffect(() => {
+    getFornecedores().then(setFornecedores).catch(() => setFornecedores([]));
+  }, []);
+  useEffect(() => {
+    const lotes = [...new Set(chaveDosLotes.split(",").filter(Boolean))];
+    getDadosDasCotacoes(lotes).then(setDadosCotacoes).catch(() => setDadosCotacoes({}));
+  }, [chaveDosLotes, lista]);
+  const nomeDoFornecedor = (id?: string | null) => fornecedores.find((f) => f.id === id)?.nome || "";
+
+  /** Melhor preço até agora do material na cotação dele ("GARRA · R$ 4,10"). */
+  const melhorNaCotacao = (group: GroupedItem): string | null => {
+    const dados = group.lote ? dadosCotacoes[group.lote] : undefined;
+    if (!dados) return null;
+    const unidades = [...new Set(dados.precos.filter((p) => p.item_id === group.item_id).map((p) => p.unidade))];
+    for (const unidade of unidades) {
+      const v = vencedorDaLinha(dados.precos, { item_id: group.item_id, unidade }, dados.fornecedorIds);
+      if (v) return `${nomeDoFornecedor(v.fornecedor_id)} · ${formatarReais(v.preco)}${unidades.length > 1 ? `/${unidade}` : ""}`;
+    }
+    return null;
+  };
+
+  /** Aguardando agrupado por fornecedor: cada pedido feito fica junto. */
+  const pedidosAguardando = useMemo(() => {
+    const mapa = new Map<string, GroupedItem[]>();
+    for (const g of porEtapa.AGUARDANDO) {
+      const chave = g.fornecedor_id || "";
+      if (!mapa.has(chave)) mapa.set(chave, []);
+      mapa.get(chave)!.push(g);
+    }
+    // Com fornecedor primeiro (por nome); os sem fornecedor no fim.
+    return [...mapa.entries()].sort(([a], [b]) => (a ? 0 : 1) - (b ? 0 : 1) || nomeDoFornecedor(a).localeCompare(nomeDoFornecedor(b)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [porEtapa, fornecedores]);
 
   // Vem da lista inteira, não só da busca: o que foi marcado continua valendo.
   const gruposMarcados = useMemo(
@@ -658,17 +736,36 @@ export default function ListaReposicao() {
     `${linhas.length} ${linhas.length === 1 ? "linha copiada" : "linhas copiadas"}: na planilha, clique em B3 e cole (Ctrl+V).` +
     (linhas.length > 32 ? " A aba MODELO tem 32 linhas: insira mais antes de colar." : "");
 
-  /** Copia os marcados e leva para "Em cotação", num subgrupo desta cópia. */
-  const copiarECotar = async () => {
-    const linhas = await copiarParaPlanilha(gruposMarcados);
-    if (!linhas) return; // sem cópia, nada muda de lugar
-    await aplicar(idsMarcados, () => moverParaCotacao(idsMarcados), avisoDaPlanilha(linhas));
+  /** Os marcados viram uma cotação nova, e ela já abre para pôr os preços. */
+  const novaCotacao = async () => {
+    if (idsMarcados.length === 0) return;
+    setAplicando(true);
+    try {
+      const lote = await moverParaCotacao(idsMarcados);
+      setSelecionados(new Set());
+      navigate(`/reposicao/cotacao/${lote}`);
+    } catch (e: any) {
+      toast.error(e?.message || "Não foi possível criar a cotação.");
+    } finally {
+      setAplicando(false);
+    }
   };
 
-  /** Só copia de novo (perdeu a cópia, colou errado). Nada muda de lugar. */
+  /** Para quem ainda usa a planilha: copia no formato dela. Nada muda de lugar. */
   const copiarLoteDeNovo = async (grupos: GroupedItem[]) => {
     const linhas = await copiarParaPlanilha(grupos);
     if (linhas) toast.success(avisoDaPlanilha(linhas));
+  };
+
+  /** A lista da cotação para pedir preço no WhatsApp. */
+  const copiarListaDoLote = async (grupos: GroupedItem[]) => {
+    const linhasDoLote = montarLinhas(grupos.flatMap((g) => [...g.manual_items, ...g.rupturas]));
+    try {
+      await navigator.clipboard.writeText(textoParaPedirPreco(linhasDoLote));
+      toast.success("Lista copiada: cole no WhatsApp dos fornecedores.");
+    } catch {
+      toast.error("O navegador não liberou a cópia. Tente de novo.");
+    }
   };
 
   const handlePrint = () => {
@@ -845,7 +942,16 @@ export default function ListaReposicao() {
                 </button>
               ))}
               {group.manual_items.length > 0 && <span>{group.rupturas.length > 0 ? "+ manual" : "Manual"}</span>}
+              {etapa === "AGUARDANDO" && group.preco_unitario != null && (
+                <>
+                  <span className="text-slate-300">·</span>
+                  <span className="font-semibold text-slate-700 tabular-nums">{formatarReais(group.preco_unitario)}</span>
+                </>
+              )}
             </p>
+            {etapa === "COTACAO" && melhorNaCotacao(group) && (
+              <p className="mt-0.5 text-xs font-bold text-emerald-700 tabular-nums">Melhor: {melhorNaCotacao(group)}</p>
+            )}
             {(urgente || etapa === "AGUARDANDO") && (
               <span
                 className={`mt-1 inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[11px] font-bold ${
@@ -1034,35 +1140,27 @@ export default function ListaReposicao() {
                   const marcados = etapaMarcada === "COTACAO" ? ids.filter((id) => selecionados.has(id)).length : 0;
                   return (
                     <div key={l.lote} className="border-t-8 first:border-t-0 border-slate-100">
-                      <div className="flex items-center gap-2 pl-4 pr-2 py-2.5 border-b border-slate-100">
-                        <CaixaDeMarcar
-                          marcado={marcados === ids.length}
-                          parcial={marcados > 0}
-                          aoMudar={() => alternarVarios(ids, "COTACAO")}
-                          rotulo={`Marcar todos da cotação ${indice + 1}`}
-                        />
+                      {/* Cabeçalho da cotação no estilo dos grupos de Requisições
+                          (maiúsculas pequenas, fundo cinza), sem bolinha: não
+                          pode parecer um item. "Marcar todos" fica no ⋯. */}
+                      <div className="flex items-center gap-2 pl-4 pr-2 py-2 bg-slate-50 border-b border-slate-200">
                         <div className="flex-1 min-w-0">
-                          <p className="text-sm font-bold text-slate-800">Cotação {indice + 1}</p>
+                          <p className="text-xs font-black uppercase tracking-wider text-slate-700">
+                            Cotação {indice + 1}
+                          </p>
                           <p className="text-[11px] font-medium text-slate-500 tabular-nums truncate">
                             {l.em ? `${format(new Date(l.em), "dd/MM HH:mm")} · ` : ""}
                             {contarItens(ids.length)}
+                            {marcados > 0 && ` · ${marcados} marcado${marcados === 1 ? "" : "s"}`}
                           </p>
                         </div>
-                        <DropdownMenu>
-                          <DropdownMenuTrigger
-                            disabled={aplicando}
-                            render={
-                              <Button className="h-8 px-2.5 text-xs bg-teal-600 hover:bg-teal-700 font-bold text-white shadow-none" />
-                            }
-                          >
-                            <Truck className="h-3.5 w-3.5" /> Pedido feito
-                            <ChevronDown className="h-3.5 w-3.5" />
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end" className="w-56 p-1.5 bg-white border border-slate-200 rounded-xl shadow-lg">
-                            <TituloDoMenu>Previsão de chegada</TituloDoMenu>
-                            <OpcoesDePrevisao aoEscolher={(p) => pedidoFeito(ids, p)} />
-                          </DropdownMenuContent>
-                        </DropdownMenu>
+                        {/* Os preços e os pedidos ficam na tela da cotação. */}
+                        <Button
+                          onClick={() => navigate(`/reposicao/cotacao/${l.lote}`)}
+                          className="h-8 px-3 text-xs bg-teal-600 hover:bg-teal-700 font-bold text-white shadow-none"
+                        >
+                          <FileSpreadsheet className="h-3.5 w-3.5" /> Abrir
+                        </Button>
                         <DropdownMenu>
                           <DropdownMenuTrigger
                             render={
@@ -1077,9 +1175,20 @@ export default function ListaReposicao() {
                             <MoreHorizontal className="h-4 w-4" />
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end" className="w-56 p-1.5 bg-white border border-slate-200 rounded-xl shadow-lg">
-                            <DropdownMenuItem onClick={() => copiarLoteDeNovo(l.grupos)} className={ITEM_DO_MENU}>
-                              <Copy className="h-3.5 w-3.5 mr-2 text-slate-500" /> Copiar de novo
+                            <DropdownMenuItem onClick={() => alternarVarios(ids, "COTACAO")} className={ITEM_DO_MENU}>
+                              <Check className="h-3.5 w-3.5 mr-2 text-slate-500" />
+                              {marcados === ids.length ? "Desmarcar todos" : "Marcar todos"}
                             </DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => copiarListaDoLote(l.grupos)} className={ITEM_DO_MENU}>
+                              <Copy className="h-3.5 w-3.5 mr-2 text-slate-500" /> Copiar lista (WhatsApp)
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => copiarLoteDeNovo(l.grupos)} className={ITEM_DO_MENU}>
+                              <FileSpreadsheet className="h-3.5 w-3.5 mr-2 text-slate-500" /> Copiar para a planilha
+                            </DropdownMenuItem>
+                            {SEPARADOR_DO_MENU}
+                            <TituloDoMenu>Pedido feito, sem preços</TituloDoMenu>
+                            <OpcoesDePrevisao aoEscolher={(p) => pedidoFeito(ids, p)} />
+                            {SEPARADOR_DO_MENU}
                             <DropdownMenuItem onClick={() => voltarParaComprar(ids, "COTACAO")} className={ITEM_DO_MENU}>
                               <Undo2 className="h-3.5 w-3.5 mr-2 text-slate-500" /> Voltar todos para A comprar
                             </DropdownMenuItem>
@@ -1100,7 +1209,29 @@ export default function ListaReposicao() {
                 total={contagem.AGUARDANDO}
                 visivelNoCelular={etapaAtiva === "AGUARDANDO"}
               >
-                {porEtapa.AGUARDANDO.map((g) => renderItem(g, "AGUARDANDO"))}
+                {/* Um pedido por fornecedor, no mesmo cartão, como as cotações.
+                    Sem nenhum pedido pela cotação do app, é a lista simples. */}
+                {pedidosAguardando.length === 1 && !pedidosAguardando[0][0]
+                  ? porEtapa.AGUARDANDO.map((g) => renderItem(g, "AGUARDANDO"))
+                  : pedidosAguardando.map(([fornecedorId, grupos]) => {
+                      const total = grupos.reduce((s, g) => s + (g.valor_pedido || 0), 0);
+                      return (
+                        <div key={fornecedorId || "sem"} className="border-t-8 first:border-t-0 border-slate-100">
+                          <div className="pl-4 pr-3 py-2 bg-slate-50 border-b border-slate-200">
+                            <p className="text-xs font-black uppercase tracking-wider text-slate-700">
+                              {fornecedorId ? `Pedido ${nomeDoFornecedor(fornecedorId) || "fornecedor"}` : "Sem fornecedor"}
+                            </p>
+                            <p className="text-[11px] font-medium text-slate-500 tabular-nums">
+                              {contarItens(grupos.length)}
+                              {total > 0 && ` · ${formatarReais(Math.round(total * 100) / 100)}`}
+                            </p>
+                          </div>
+                          <div className="divide-y divide-slate-100">
+                            {grupos.map((g) => renderItem(g, "AGUARDANDO"))}
+                          </div>
+                        </div>
+                      );
+                    })}
               </Bloco>
             </div>
           </>
@@ -1125,13 +1256,12 @@ export default function ListaReposicao() {
             {etapaMarcada === "COMPRAR" ? (
               <>
                 <Button
-                  onClick={copiarECotar}
+                  onClick={novaCotacao}
                   disabled={aplicando}
                   className="h-8 px-2.5 bg-teal-600 hover:bg-teal-700 font-bold text-white shadow-none"
                 >
-                  <Copy className="h-3.5 w-3.5 max-[359px]:hidden" />
-                  <span className="sm:hidden">Copiar</span>
-                  <span className="hidden sm:inline">Copiar para cotação</span>
+                  <FileSpreadsheet className="h-3.5 w-3.5 max-[359px]:hidden" />
+                  Nova cotação
                 </Button>
                 <DropdownMenu>
                   <DropdownMenuTrigger

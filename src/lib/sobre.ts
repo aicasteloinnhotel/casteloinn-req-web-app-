@@ -7,7 +7,7 @@
 
 export const APP = {
   nome: "Sistema de Requisições",
-  versao: "1.9.1",
+  versao: "1.10",
   desenvolvedor: "Nilton Junio Evangelista de Melo",
   descricao: "Pedido de material pelo celular, do pedido à entrega assinada.",
 };

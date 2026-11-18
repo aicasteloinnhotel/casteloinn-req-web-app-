@@ -43,6 +43,42 @@ export const ROTULO_TIPO: Record<TipoMudanca, string> = {
 
 export const VERSOES: Versao[] = [
   {
+    versao: "1.10",
+    data: "18/11/2026",
+    titulo: "Cotação dentro do app",
+    mudancas: [
+      {
+        tipo: "novo",
+        publico: "almoxarifado",
+        texto:
+          "A cotação agora é feita no app, sem planilha: escolha os fornecedores, copie a lista para o WhatsApp, digite os preços e o app mostra o menor de cada item.",
+      },
+      {
+        tipo: "novo",
+        publico: "almoxarifado",
+        texto:
+          "Sai o pedido de cada fornecedor, com o total, pronto para copiar no WhatsApp. Em Aguardando, os itens ficam agrupados por pedido.",
+      },
+      {
+        tipo: "novo",
+        publico: "almoxarifado",
+        texto: "O app guarda o preço pago: na próxima cotação aparece a última compra de cada item.",
+      },
+    ],
+  },
+  {
+    versao: "1.9.2",
+    data: "18/11/2026",
+    titulo: "Títulos da Lista de Reposição",
+    mudancas: [
+      {
+        tipo: "melhoria",
+        publico: "almoxarifado",
+        texto: "Os títulos dos blocos e das cotações não se confundem mais com os itens: fundo cinza e “Marcar todos” em texto.",
+      },
+    ],
+  },
+  {
     versao: "1.9.1",
     data: "18/11/2026",
     titulo: "Cotações separadas",

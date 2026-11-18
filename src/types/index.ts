@@ -127,6 +127,9 @@ export interface ItemReposicao {
   /** Em cotação: qual cópia para a planilha (AJUSTE_07). Vazio = não está. */
   cotacao_lote?: string | null;
   cotacao_em?: string | null;
+  /** Pedido feito pela cotação no app (AJUSTE_08): de quem e por quanto. */
+  fornecedor_id?: string | null;
+  preco_unitario?: number | null;
   created_at: string;
   item?: Item;
   requisicao?: {

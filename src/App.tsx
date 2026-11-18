@@ -20,6 +20,7 @@ import DetalheRequisicao from './pages/requisicoes/DetalheRequisicao';
 // para abrir uma tela que ela nunca vai usar.
 const Separacao = lazy(() => import('./pages/requisicoes/Separacao'));
 const ListaReposicao = lazy(() => import('./pages/requisicoes/ListaReposicao'));
+const CotacaoReposicao = lazy(() => import('./pages/requisicoes/CotacaoReposicao'));
 const Usuarios = lazy(() => import('./pages/admin/Usuarios'));
 const Itens = lazy(() => import('./pages/admin/Itens'));
 const AjudaSobre = lazy(() => import('./pages/AjudaSobre'));
@@ -83,6 +84,7 @@ export default function App() {
             <Route element={<RequireAlmoxarifado />}>
               <Route path="/requisicoes/:id/separacao" element={<Suspense fallback={<CarregandoTela />}><Separacao /></Suspense>} />
               <Route path="/reposicao" element={<Suspense fallback={<CarregandoTela />}><ListaReposicao /></Suspense>} />
+              <Route path="/reposicao/cotacao/:lote" element={<Suspense fallback={<CarregandoTela />}><CotacaoReposicao /></Suspense>} />
               <Route path="/admin/usuarios" element={<Suspense fallback={<CarregandoTela />}><Usuarios /></Suspense>} />
               <Route path="/admin/itens" element={<Suspense fallback={<CarregandoTela />}><Itens /></Suspense>} />
             </Route>

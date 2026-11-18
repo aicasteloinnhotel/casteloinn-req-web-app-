@@ -367,6 +367,11 @@ export async function baixarQuantidadeReposicaoEmMassa(
                   tipo_origem: itemOriginal.tipo_origem,
                   requisicao_id: itemOriginal.requisicao_id || null,
                   unidade: itemOriginal.unidade ?? null,
+                  // A parte que chegou leva fornecedor e preço (histórico de
+                  // preços). Só quando a coluna existe: antes do AJUSTE_08 o
+                  // campo nem vem, e mandar coluna desconhecida derrubava a baixa.
+                  ...(itemOriginal.fornecedor_id !== undefined ? { fornecedor_id: itemOriginal.fornecedor_id } : {}),
+                  ...(itemOriginal.preco_unitario !== undefined ? { preco_unitario: itemOriginal.preco_unitario } : {}),
                   quantidade: subtracao,
                   resolvido: true,
                   resolvido_por: resolvidaPor || null,

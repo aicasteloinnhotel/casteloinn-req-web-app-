@@ -522,10 +522,17 @@ export default function AjudaSobre() {
                     dar baixa de parte da quantidade.
                   </p>
                   <p>
-                    Para cotar, marque os itens em A comprar e toque em{" "}
-                    <strong>Copiar para cotação</strong>: na planilha, clique em <strong>B3</strong> e
-                    cole com Ctrl+V. Fechou com o fornecedor? Em Em cotação, toque em{" "}
-                    <strong>Pedido feito</strong> e escolha a previsão de chegada.
+                    Para cotar, marque os itens em A comprar e toque em <strong>Nova cotação</strong>.
+                    A cotação abre: escolha os fornecedores, toque em <strong>Copiar lista</strong> e
+                    mande no WhatsApp deles. Conforme os preços chegam, digite cada um (no celular,
+                    um fornecedor por vez). O menor preço fica verde; para levar de outro, troque em{" "}
+                    <strong>Leva</strong> (no computador).
+                  </p>
+                  <p>
+                    Embaixo aparece o pedido de cada fornecedor, com o total. Toque no ícone de copiar
+                    para mandar o pedido no WhatsApp dele e, depois, em <strong>Pedido feito</strong>{" "}
+                    com a previsão de chegada. Os itens vão para Aguardando, agrupados por fornecedor,
+                    e o preço fica guardado: na próxima cotação aparece a última compra.
                   </p>
                   <p>
                     <strong>Urgente</strong> é uma marca, não uma etapa: o item fica em vermelho no
