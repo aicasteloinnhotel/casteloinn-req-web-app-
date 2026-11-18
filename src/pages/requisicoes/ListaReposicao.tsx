@@ -7,6 +7,7 @@ import {
   adicionarItemReposicao,
   baixarQuantidadeReposicaoEmMassa,
   definirEstadoDosItens,
+  definirUrgencia,
   moverParaCotacao,
   tirarDaCotacao,
   restaurarEstado,
@@ -31,23 +32,30 @@ import { Card, CardContent } from "@/components/ui/card";
 import { contemTexto, descreverQuantidades, formatItemName } from "@/lib/utils";
 import { imprimirPdf } from "@/lib/imprimir";
 import { CampoBusca } from "@/components/CampoBusca";
-import { BOTAO_ICONE, BOTAO_PRIMARIO, TITULO } from "@/lib/estilos";
-import { 
-  Search, 
-  History, 
-  Check, 
-  Clock, 
-  AlertTriangle, 
-  Printer, 
-  Plus, 
-  CheckCircle2, 
-  CheckSquare, 
-  Truck, 
-  ChevronDown, 
-  Package, 
-  ChevronsUpDown,
-  Maximize2,
-  Minimize2,
+import { ABA_ATIVA, ABA_FILA, ABA_INATIVA, ABAS_FILA, BOTAO_ICONE, BOTAO_PRIMARIO, TITULO } from "@/lib/estilos";
+import {
+  ETAPAS,
+  ehEtapa,
+  ehUrgente,
+  etapaDoGrupo,
+  ordenarNaEtapa,
+  rotuloDaPrevisao,
+  rotuloDaUrgencia,
+  type EtapaReposicao,
+} from "@/lib/etapasReposicao";
+import {
+  Search,
+  History,
+  Check,
+  AlertTriangle,
+  Printer,
+  Plus,
+  CheckCircle2,
+  CheckSquare,
+  Truck,
+  ChevronDown,
+  MoreHorizontal,
+  ShoppingCart,
   Pencil,
   Trash2,
   FileSpreadsheet,
@@ -82,82 +90,49 @@ export type GroupedItem = {
 /** "1 item", "3 itens". */
 const contarItens = (n: number) => `${n} ${n === 1 ? "item" : "itens"}`;
 
-function formatRemainingTime(targetDate: number | null | undefined, now: number) {
-  if (!targetDate) return "Indefinido";
-  const diff = targetDate - now;
-  if (diff <= 0) return "Atrasado";
-  const days = Math.floor(diff / (1000 * 60 * 60 * 24));
-  const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
-  const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
-  
-  if (days > 0) {
-    return `Resta${days > 1 ? 'm' : ''} ${days} dia${days > 1 ? 's' : ''}`;
-  } else {
-    if (hours > 0) return `Resta${hours > 1 ? 'm' : ''} ${hours} hora${hours > 1 ? 's' : ''} e ${minutes} min`;
-    if (minutes > 0) return `Restam ${minutes} min`;
-    return "Menos de 1 min";
-  }
+/** Rótulo de uma seção dentro de um menu. */
+function TituloDoMenu({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="px-2 pt-1.5 pb-1 text-[10px] font-black text-slate-500 uppercase tracking-wider">
+      {children}
+    </div>
+  );
 }
 
-/**
- * Cor de cada modalidade, usada só como ACENTO.
- *
- * Antes a seção inteira era um retângulo tingido (`bg-red-50/20`) com o corpo
- * em `bg-white/60` por cima — daí os "pedaços sem pintar". E nenhuma outra tela
- * do app faz isso: todas usam cartão branco sobre fundo cinza-claro, com a cor
- * aparecendo só em detalhes. Aqui a seção passa a ser um cartão branco igual
- * aos outros, e a cor fica no ícone, no contador e na borda lateral do item.
- */
-type SecaoDaLista = ModalidadeReposicao | "COTACAO";
+const ITEM_DO_MENU = "text-xs font-semibold text-slate-700 focus:bg-slate-50 cursor-pointer rounded-lg py-1.5";
+const SEPARADOR_DO_MENU = <div className="h-px bg-slate-100 my-1.5" />;
 
-const ACENTO: Record<SecaoDaLista, {
-  icone: string; contador: string; bordaItem: string;
-}> = {
-  URGENTE:    { icone: "bg-red-50 text-red-600",     contador: "bg-red-50 text-red-700 border-red-200",       bordaItem: "border-l-red-400" },
-  COTACAO:    { icone: "bg-sky-50 text-sky-700",     contador: "bg-sky-50 text-sky-800 border-sky-200",       bordaItem: "border-l-sky-400" },
-  AGUARDANDO: { icone: "bg-amber-50 text-amber-700", contador: "bg-amber-50 text-amber-800 border-amber-200", bordaItem: "border-l-amber-400" },
-  NORMAL:     { icone: "bg-teal-50 text-teal-700",   contador: "bg-slate-50 text-slate-700 border-slate-200", bordaItem: "border-l-slate-300" },
-};
-
-/** As opções de estado: o mesmo menu para um item e para vários. */
-function OpcoesDeEstado({ aoEscolher }: { aoEscolher: (m: ModalidadeReposicao, prazo?: string) => void }) {
+/** Previsões de chegada: "Pedido feito" e "Mudar previsão". */
+function OpcoesDePrevisao({ aoEscolher }: { aoEscolher: (prazo: string) => void }) {
   return (
     <>
-      <div className="px-2 py-1 text-[10px] font-black text-amber-800 uppercase tracking-wider flex items-center gap-1.5">
-        <Truck className="w-3.5 h-3.5 text-amber-600" />
-        Aguardando chegada
-      </div>
       {PRAZOS_AGUARDANDO.map((o) => (
-        <DropdownMenuItem
-          key={o.prazo}
-          onClick={() => aoEscolher("AGUARDANDO", o.prazo)}
-          className="text-xs font-semibold text-amber-950 focus:bg-amber-50 cursor-pointer rounded-lg py-1.5 pl-7"
-        >
+        <DropdownMenuItem key={o.prazo} onClick={() => aoEscolher(o.prazo)} className={`${ITEM_DO_MENU} pl-4`}>
           {o.rotulo}
         </DropdownMenuItem>
       ))}
-      <div className="h-px bg-slate-100 my-1.5" />
-      <div className="px-2 py-1 text-[10px] font-black text-red-700 uppercase tracking-wider flex items-center gap-1.5">
-        <AlertTriangle className="w-3.5 h-3.5 text-red-600" />
-        Urgente
-      </div>
+    </>
+  );
+}
+
+/** Prazos da urgência e, se já é urgente, tirar a marca. */
+function OpcoesDeUrgencia({ urgente, aoEscolher }: { urgente: boolean; aoEscolher: (prazo?: string) => void }) {
+  return (
+    <>
       {PRAZOS_URGENTE.map((o) => (
         <DropdownMenuItem
           key={o.prazo}
-          onClick={() => aoEscolher("URGENTE", o.prazo)}
-          className="text-xs font-bold text-red-700 focus:bg-red-50 cursor-pointer rounded-lg py-1.5 pl-7"
+          onClick={() => aoEscolher(o.prazo)}
+          className={`${ITEM_DO_MENU} pl-4 text-red-700 focus:bg-red-50`}
         >
           {o.rotulo}
         </DropdownMenuItem>
       ))}
-      <div className="h-px bg-slate-100 my-1.5" />
-      <DropdownMenuItem
-        onClick={() => aoEscolher("NORMAL")}
-        className="font-medium text-slate-600 focus:bg-slate-50 cursor-pointer rounded-lg text-xs py-2 flex items-center gap-2"
-      >
-        <Clock className="w-3.5 h-3.5 text-slate-400" />
-        Normal (padrão)
-      </DropdownMenuItem>
+      {urgente && (
+        <DropdownMenuItem onClick={() => aoEscolher()} className={`${ITEM_DO_MENU} pl-4`}>
+          Tirar urgência
+        </DropdownMenuItem>
+      )}
     </>
   );
 }
@@ -184,78 +159,49 @@ function CaixaDeMarcar({
   );
 }
 
-/** Uma seção da lista (Urgentes / Em cotação / Aguardando / Normais). */
-function SecaoReposicao({
-  modalidade, titulo, icone, grupos, aberta, onToggle, renderCard, corpo, selecionados, aoAlternarTodos,
+/**
+ * Um bloco (etapa da compra): cartão branco com cabeçalho e a lista. No
+ * computador os três ficam lado a lado; no celular aparece o da aba escolhida,
+ * e o cabeçalho só fica se tiver o "marcar todos" (a aba já diz o nome).
+ */
+function Bloco({
+  titulo, icone, total, visivelNoCelular, marcarTodos, children,
 }: {
-  modalidade: SecaoDaLista;
   titulo: string;
   icone: React.ReactNode;
-  grupos: GroupedItem[];
-  aberta: boolean;
-  onToggle: () => void;
-  renderCard: (g: GroupedItem) => React.ReactNode;
-  /** No lugar da lista simples (os subgrupos da cotação). */
-  corpo?: React.ReactNode;
-  selecionados: Set<string>;
-  aoAlternarTodos: (itemIds: string[]) => void;
+  total: number;
+  visivelNoCelular: boolean;
+  marcarTodos?: { marcado: boolean; parcial: boolean; aoMudar: () => void };
+  children: React.ReactNode;
 }) {
-  const c = ACENTO[modalidade];
-  const vazia = grupos.length === 0;
-
-  // Seção sem item vira uma faixa fina, sem corpo.
-  if (vazia) {
-    return (
-      <div className="bg-white border border-slate-200 rounded-xl px-4 py-2.5 flex items-center gap-2.5">
-        <span className={`w-6 h-6 rounded-lg flex items-center justify-center shrink-0 opacity-50 ${c.icone} [&_svg]:w-3.5 [&_svg]:h-3.5`}>
+  return (
+    <section
+      className={`${visivelNoCelular ? "block" : "hidden"} lg:block min-w-0 bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-lg shadow-slate-200/50`}
+    >
+      <div
+        className={`${marcarTodos && total > 0 ? "flex" : "hidden lg:flex"} items-center gap-2.5 pl-4 pr-4 py-2.5 lg:py-3 border-b border-slate-100`}
+      >
+        {marcarTodos && total > 0 && (
+          <CaixaDeMarcar
+            marcado={marcarTodos.marcado}
+            parcial={marcarTodos.parcial}
+            aoMudar={marcarTodos.aoMudar}
+            rotulo={`Marcar todos de ${titulo}`}
+          />
+        )}
+        <span className="lg:hidden text-sm font-semibold text-slate-600">Marcar todos</span>
+        <span className="hidden lg:flex w-8 h-8 rounded-lg bg-teal-50 text-teal-700 items-center justify-center shrink-0 [&_svg]:w-4 [&_svg]:h-4">
           {icone}
         </span>
-        <span className="text-sm font-semibold text-slate-400">{titulo}</span>
-        <span className="text-xs text-slate-400 ml-auto">nenhum item</span>
+        <h2 className="hidden lg:block text-sm font-bold text-slate-800 truncate">{titulo}</h2>
+        <span className="hidden lg:block ml-auto text-xs font-bold text-slate-500 tabular-nums">{total}</span>
       </div>
-    );
-  }
-
-  const ids = grupos.map((g) => g.item_id);
-  const marcados = ids.filter((id) => selecionados.has(id)).length;
-
-  return (
-    <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-lg shadow-slate-200/50">
-      <div className="flex items-center pl-4 hover:bg-slate-50 transition-colors">
-        <CaixaDeMarcar
-          marcado={marcados === ids.length}
-          parcial={marcados > 0}
-          aoMudar={() => aoAlternarTodos(ids)}
-          rotulo={`Marcar todos de ${titulo}`}
-        />
-        <button
-          type="button"
-          onClick={onToggle}
-          className="flex-1 min-w-0 text-left pl-3 pr-4 py-3 flex items-center justify-between select-none"
-        >
-          <div className="flex items-center gap-3 min-w-0">
-            <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${c.icone}`}>
-              {icone}
-            </div>
-            {/* A descrição de cada seção saiu: o título já diz o que é. */}
-            <h2 className="text-base font-bold text-slate-800 truncate">{titulo}</h2>
-          </div>
-
-          <div className="flex items-center gap-2 shrink-0">
-            <span className={`px-2.5 py-0.5 rounded-full text-xs font-bold border ${c.contador}`}>
-              {grupos.length}
-            </span>
-            <ChevronDown className={`w-5 h-5 text-slate-400 transition-transform duration-200 ${aberta ? "rotate-180" : ""}`} />
-          </div>
-        </button>
-      </div>
-
-      {aberta && (
-        <div className="border-t border-slate-100 divide-y divide-slate-100">
-          {corpo ?? grupos.map((g) => renderCard(g))}
-        </div>
+      {total === 0 ? (
+        <p className="px-4 py-8 text-center text-sm text-slate-500">Nada aqui.</p>
+      ) : (
+        <div className="divide-y divide-slate-100">{children}</div>
       )}
-    </div>
+    </section>
   );
 }
 
@@ -313,42 +259,43 @@ export default function ListaReposicao() {
     return () => clearInterval(int);
   }, []);
 
-  // Accordion state
-  const [openSections, setOpenSections] = useState<Record<SecaoDaLista, boolean>>({
-    URGENTE: true,
-    COTACAO: true,
-    AGUARDANDO: true,
-    NORMAL: true
+  // Etapa aberta no celular (no computador as três aparecem lado a lado).
+  const [etapaAtiva, setEtapaAtiva] = useState<EtapaReposicao>(() => {
+    try {
+      const salva = sessionStorage.getItem("reposicao_etapa");
+      return ehEtapa(salva) ? salva : "COMPRAR";
+    } catch {
+      return "COMPRAR";
+    }
   });
-
-  const toggleSection = (section: SecaoDaLista) => {
-    setOpenSections(prev => ({
-      ...prev,
-      [section]: !prev[section]
-    }));
+  const trocarEtapa = (etapa: EtapaReposicao) => {
+    setEtapaAtiva(etapa);
+    try {
+      sessionStorage.setItem("reposicao_etapa", etapa);
+    } catch {
+      // Sem sessionStorage (aba anônima): só não lembra a aba.
+    }
   };
 
-  // Itens marcados (pelo material). Continuam marcados ao mudar a busca: dá para
-  // buscar "arroz", marcar, buscar "feijão", marcar, e agir sobre os dois.
+  // Itens marcados (pelo material), sempre de UMA etapa: a ação da barra é a
+  // da etapa (copiar para cotação, pedido feito). Marcar em outra etapa começa
+  // uma marcação nova. Continuam marcados ao mudar a busca.
   const [selecionados, setSelecionados] = useState<Set<string>>(new Set());
+  const [etapaMarcada, setEtapaMarcada] = useState<EtapaReposicao | null>(null);
   const [aplicando, setAplicando] = useState(false);
 
-  const alternarItem = (itemId: string) =>
-    setSelecionados((atual) => {
-      const novo = new Set(atual);
-      if (novo.has(itemId)) novo.delete(itemId);
-      else novo.add(itemId);
-      return novo;
-    });
-
   /** Todos marcados: desmarca. Senão: marca os que faltam. */
-  const alternarVarios = (itemIds: string[]) =>
+  const alternarVarios = (itemIds: string[], etapa: EtapaReposicao) => {
+    const mesmaEtapa = etapaMarcada === etapa;
     setSelecionados((atual) => {
-      const novo = new Set(atual);
+      const novo = new Set(mesmaEtapa ? atual : []);
       if (itemIds.every((id) => novo.has(id))) itemIds.forEach((id) => novo.delete(id));
       else itemIds.forEach((id) => novo.add(id));
       return novo;
     });
+    setEtapaMarcada(etapa);
+  };
+  const alternarItem = (itemId: string, etapa: EtapaReposicao) => alternarVarios([itemId], etapa);
 
   const desfazer = async (foto: FotoDeEstado[]) => {
     try {
@@ -385,24 +332,40 @@ export default function ListaReposicao() {
     }
   };
 
-  const mudarEstado = (itemIds: string[], modalidade: ModalidadeReposicao, prazo?: string) => {
-    const destino =
-      modalidade === "NORMAL" ? "Normal"
-      : modalidade === "URGENTE" ? `Urgente (${prazo || "Hoje"})`
-      : "Aguardando chegada";
-    return aplicar(
-      itemIds,
-      () => definirEstadoDosItens(itemIds, modalidade, prazo),
-      `${contarItens(itemIds.length)} em ${destino}.`,
-    );
-  };
-
-  const voltarDaCotacao = (itemIds: string[]) =>
+  /** Pedido feito (ou mudar a previsão): vai para Aguardando entrega. */
+  const pedidoFeito = (itemIds: string[], prazo: string) =>
     aplicar(
       itemIds,
-      () => tirarDaCotacao(itemIds),
-      `${contarItens(itemIds.length)} de volta ao estado anterior.`,
+      () => definirEstadoDosItens(itemIds, "AGUARDANDO", prazo),
+      `${contarItens(itemIds.length)} em Aguardando entrega.`,
     );
+
+  /** Urgência é marca, não etapa: o item continua onde está. */
+  const mudarUrgencia = (itemIds: string[], prazo?: string) =>
+    aplicar(
+      itemIds,
+      () => definirUrgencia(itemIds, prazo),
+      prazo ? `${contarItens(itemIds.length)}: urgente, ${prazo.toLowerCase()}.` : "Urgência tirada.",
+    );
+
+  /** Da cotação volta como estava (urgência fica); de Aguardando, volta normal. */
+  const voltarParaComprar = (itemIds: string[], etapa: EtapaReposicao) =>
+    aplicar(
+      itemIds,
+      () => (etapa === "COTACAO" ? tirarDaCotacao(itemIds) : definirEstadoDosItens(itemIds, "NORMAL")),
+      `${contarItens(itemIds.length)} de volta em A comprar.`,
+    );
+
+  /** Chegou: baixa na hora (item manual) ou a janela (ruptura / várias linhas). */
+  const abrirChegou = (group: GroupedItem) => {
+    if (group.rupturas.length > 0 || group.manual_items.length > 1) {
+      setResolvingGroup(group);
+      setManualResolveQtd(group.manual_items.reduce((acc, l) => acc + l.quantidade, 0));
+    } else {
+      setInlineResolveId(group.item_id);
+      setInlineResolveQtd(group.total_quantidade);
+    }
+  };
 
   const recarregarLista = async (showLoading = true) => {
     if (showLoading) setIsLoading(true);
@@ -537,32 +500,22 @@ export default function ListaReposicao() {
     return groupedItems.filter(g => contemTexto(formatItemName(g.item?.nome), searchTerm));
   }, [groupedItems, searchTerm]);
 
-  // Em cotação é uma seção à parte; quem sai dela volta para a do seu estado.
-  const itensUrgentes = useMemo(() => {
-    return displayedItems.filter(i => !i.lote && i.modalidade === "URGENTE");
+  // Cada material numa etapa, já na ordem da etapa (urgentes no topo).
+  const porEtapa = useMemo(() => {
+    const r: Record<EtapaReposicao, GroupedItem[]> = { COMPRAR: [], COTACAO: [], AGUARDANDO: [] };
+    for (const g of displayedItems) r[etapaDoGrupo(g)].push(g);
+    for (const { etapa } of ETAPAS) r[etapa] = ordenarNaEtapa(r[etapa], etapa);
+    return r;
   }, [displayedItems]);
 
-  const itensEmCotacao = useMemo(() => {
-    return displayedItems.filter(i => !!i.lote);
-  }, [displayedItems]);
-
-  const lotesDeCotacao = useMemo(() => separarEmLotes(itensEmCotacao), [itensEmCotacao]);
-
-  const itensAguardando = useMemo(() => {
-    return displayedItems.filter(i => !i.lote && i.modalidade === "AGUARDANDO");
-  }, [displayedItems]);
-
-  const itensNormais = useMemo(() => {
-    return displayedItems.filter(i => !i.lote && i.modalidade === "NORMAL");
-  }, [displayedItems]);
+  const lotesDeCotacao = useMemo(() => separarEmLotes(porEtapa.COTACAO), [porEtapa]);
 
   // Vem da lista inteira, não só da busca: o que foi marcado continua valendo.
   const gruposMarcados = useMemo(
-    () => groupedItems.filter((g) => selecionados.has(g.item_id)),
-    [groupedItems, selecionados],
+    () => groupedItems.filter((g) => selecionados.has(g.item_id) && etapaDoGrupo(g) === etapaMarcada),
+    [groupedItems, selecionados, etapaMarcada],
   );
   const idsMarcados = gruposMarcados.map((g) => g.item_id);
-  const algumMarcadoEmCotacao = gruposMarcados.some((g) => !!g.lote);
 
   const handleAddItemManual = async () => {
     if (!itemAtual || !user) return;
@@ -731,21 +684,24 @@ export default function ListaReposicao() {
     doc.setFontSize(10);
     doc.text(`Gerado em: ${format(new Date(), "dd/MM/yyyy 'às' HH:mm")}`, 105, 36, { align: "center" });
 
-    const head = [["Nome do Item", "Qtd. Nec.", "Origem", "Modalidade / Status"]];
-    const body = groupedItems.map((group) => {
+    const head = [["Nome do Item", "Qtd. Nec.", "Origem", "Etapa"]];
+    const agora = Date.now();
+    // Na ordem da compra: A comprar, Em cotação, Aguardando (urgentes no topo).
+    const naOrdem = ETAPAS.flatMap(({ etapa }) =>
+      ordenarNaEtapa(groupedItems.filter((g) => etapaDoGrupo(g) === etapa), etapa),
+    );
+    const body = naOrdem.map((group) => {
       const origens = [];
       if (group.rupturas.length > 0) origens.push(`Reqs: ${group.rupturas.map(r => r.requisicao?.codigo_requisicao || '?').join(', ')}`);
       if (group.manual_items.length > 0) origens.push('Manual');
       const origemStr = origens.join(" | ");
       
-      let statusStr = "Normal";
-      if (group.lote) {
-        statusStr = "EM COTAÇÃO";
-      } else if (group.modalidade === 'URGENTE') {
-        statusStr = `URGENTE${group.prazo_original ? ` (${group.prazo_original})` : ''}`;
-      } else if (group.modalidade === 'AGUARDANDO') {
-        statusStr = `AGUARDANDO CHEGADA / PEDIDO${group.prazo_original && group.prazo_original !== 'PEDIDO' ? ` (${group.prazo_original})` : ''}`;
-      }
+      const etapa = etapaDoGrupo(group);
+      let statusStr =
+        etapa === "COTACAO" ? "Em cotação"
+        : etapa === "AGUARDANDO" ? `Aguardando · ${rotuloDaPrevisao(group, agora)}`
+        : "A comprar";
+      if (ehUrgente(group)) statusStr += ` · ${rotuloDaUrgencia(group, agora)}`;
       
       return [
         formatItemName(group.item?.nome) || "Item Desconhecido",
@@ -772,253 +728,202 @@ export default function ListaReposicao() {
     imprimirPdf(doc);
   };
 
-  // Render individual item card
-  const renderItemCard = (group: GroupedItem) => {
-    const isUrgente = group.modalidade === "URGENTE";
-    const isAguardando = group.modalidade === "AGUARDANDO";
-    const emCotacao = !!group.lote;
-    const marcado = selecionados.has(group.item_id);
+  /** Menu "⋯" do item: tudo o que não é o próximo passo da etapa. */
+  const menuDoItem = (group: GroupedItem, etapa: EtapaReposicao, nome: string) => {
+    const ids = [group.item_id];
+    // Corrigir e remover só para linhas MANUAIS: a de ruptura vem de uma
+    // requisição real e é tratada nela.
+    const soManual = group.manual_items.length > 0 && group.rupturas.length === 0;
+    return (
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          render={
+            <Button
+              variant="ghost"
+              size="icon"
+              aria-label={`Opções de ${nome}`}
+              className="h-8 w-8 shrink-0 text-slate-500 hover:text-slate-800 hover:bg-slate-100"
+            />
+          }
+        >
+          <MoreHorizontal className="h-4 w-4" />
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-60 p-1.5 bg-white border border-slate-200 rounded-xl shadow-lg">
+          {etapa === "AGUARDANDO" ? (
+            <>
+              <TituloDoMenu>Mudar previsão</TituloDoMenu>
+              <OpcoesDePrevisao aoEscolher={(p) => pedidoFeito(ids, p)} />
+            </>
+          ) : (
+            <>
+              <TituloDoMenu>{etapa === "COTACAO" ? "Pedido feito" : "Já pedido, sem cotação"}</TituloDoMenu>
+              <OpcoesDePrevisao aoEscolher={(p) => pedidoFeito(ids, p)} />
+              {SEPARADOR_DO_MENU}
+              <TituloDoMenu>Urgente</TituloDoMenu>
+              <OpcoesDeUrgencia urgente={ehUrgente(group)} aoEscolher={(p) => mudarUrgencia(ids, p)} />
+            </>
+          )}
+          {SEPARADOR_DO_MENU}
+          {etapa !== "COMPRAR" && (
+            <DropdownMenuItem onClick={() => voltarParaComprar(ids, etapa)} className={ITEM_DO_MENU}>
+              <Undo2 className="h-3.5 w-3.5 mr-2 text-slate-500" /> Voltar para A comprar
+            </DropdownMenuItem>
+          )}
+          {etapa !== "AGUARDANDO" && (
+            <DropdownMenuItem onClick={() => abrirChegou(group)} className={ITEM_DO_MENU}>
+              <Check className="h-3.5 w-3.5 mr-2 text-slate-500" /> Chegou
+            </DropdownMenuItem>
+          )}
+          {soManual && (
+            <>
+              <DropdownMenuItem
+                onClick={() => {
+                  setGrupoParaEditar(group);
+                  setNovaQtdManual(group.total_quantidade);
+                }}
+                className={ITEM_DO_MENU}
+              >
+                <Pencil className="h-3.5 w-3.5 mr-2 text-slate-500" /> Corrigir quantidade
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={() => setGrupoParaExcluir(group)}
+                className={`${ITEM_DO_MENU} text-red-700 focus:bg-red-50`}
+              >
+                <Trash2 className="h-3.5 w-3.5 mr-2" /> Remover da lista
+              </DropdownMenuItem>
+            </>
+          )}
+        </DropdownMenuContent>
+      </DropdownMenu>
+    );
+  };
+
+  /** Um material dentro do bloco: nome, quantidade, de onde veio e a marca. */
+  const renderItem = (group: GroupedItem, etapa: EtapaReposicao) => {
+    const nome = formatItemName(group.item?.nome) || "Item excluído";
+    const urgente = ehUrgente(group);
+    const marcavel = etapa !== "AGUARDANDO";
+    const marcado = marcavel && etapaMarcada === etapa && selecionados.has(group.item_id);
+    const resolvendoAqui = inlineResolveId === group.item_id;
 
     return (
-      // Sem animação de entrada e saída: com vários itens mudando de seção de uma
-      // vez, a linha muda na hora, e aba em segundo plano não deixa linha fantasma.
-      <div key={group.item_id}>
-        {/* Item = linha branca com borda colorida à esquerda, o mesmo padrão
-            do cartão de requisição no resto do app. Antes era um cartão com o
-            fundo inteiro tingido, que destoava de todas as outras telas. */}
-        <div
-          className={`border-l-4 transition-colors ${marcado ? "bg-teal-50/70" : "bg-white hover:bg-slate-50/70"} ${
-            emCotacao ? "border-l-sky-400" : isUrgente ? "border-l-red-400" : isAguardando ? "border-l-amber-400" : "border-l-slate-200"
-          }`}
-        >
-          <div className="p-4 flex items-start gap-3">
-          <div className="pt-0.5">
-            <CaixaDeMarcar
-              marcado={marcado}
-              aoMudar={() => alternarItem(group.item_id)}
-              rotulo={`Marcar ${formatItemName(group.item?.nome)}`}
-            />
-          </div>
-          <div className="flex-1 min-w-0 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-
-            <div className="flex-1 min-w-0">
-              {/* A etiqueta de status que existia aqui foi removida: o cartão
-                  já está dentro da seção "Itens Urgentes" / "Aguardando
-                  Chegada", o botão ao lado mostra o estado e a contagem
-                  regressiva abaixo repete a mesma informação. Eram três avisos
-                  para o mesmo fato. */}
-              <div className="mb-1.5">
-                <h3 className="font-bold text-teal-950 text-base sm:text-lg break-words">
-                  {formatItemName(group.item?.nome) || "Item Excluído"}
-                </h3>
-              </div>
-
-              <p className="text-sm text-slate-700 flex flex-wrap items-center gap-x-3 gap-y-1">
-                {/* Unidade de cada falta, não a do catálogo: quem pediu 10 UN
-                    de um material cadastrado em L precisa de 10 UN. */}
-                <span className="font-bold text-teal-800">
-                  Qtd: {descreverQuantidades([...group.manual_items, ...group.rupturas])}
-                </span>
-                <span>•</span>
-                {group.rupturas.length > 0 ? (
-                  <span>Ruptura: REQ {group.rupturas.map(r => `#${r.requisicao?.codigo_requisicao}`).join(", ")}</span>
-                ) : (
-                  <span>Manual</span>
-                )}
-
-                {isUrgente && group.prazo_target_date && (
-                  <>
-                    <span>•</span>
-                    <span className={`font-bold flex items-center gap-1 ${group.prazo_target_date < nowTime ? 'text-red-600' : 'text-orange-600'}`}>
-                      <Clock className="w-3.5 h-3.5"/> {formatRemainingTime(group.prazo_target_date, nowTime)} ({group.prazo_original})
-                    </span>
-                  </>
-                )}
-
-                {isAguardando && (
-                  <>
-                    <span>•</span>
-                    <span className="font-bold text-amber-800 flex items-center gap-1.5">
-                      <Truck className="w-3.5 h-3.5 text-amber-600" />
-                      {group.prazo_original && group.prazo_original !== 'PEDIDO' && group.prazo_original !== 'AGUARDANDO' && !group.prazo_original.includes('Já Solicitado')
-                        ? group.prazo_original.replace('PEDIDO: ', 'Previsão: ') 
-                        : 'Pedido Realizado (Aguardando Entrega)'}
-                    </span>
-                  </>
-                )}
-              </p>
+      // Sem animação de entrada e saída: com vários itens mudando de bloco de
+      // uma vez, a linha muda na hora e não fica linha fantasma.
+      <div
+        key={group.item_id}
+        className={`border-l-4 ${urgente ? "border-l-red-400" : "border-l-transparent"} ${
+          marcado ? "bg-teal-50/70" : "bg-white"
+        }`}
+      >
+        <div className="flex items-start gap-3 pl-3 pr-2 py-2.5">
+          {marcavel && (
+            <div className="pt-0.5">
+              <CaixaDeMarcar
+                marcado={marcado}
+                aoMudar={() => alternarItem(group.item_id, etapa)}
+                rotulo={`Marcar ${nome}`}
+              />
             </div>
-
-            {/* Em linha também no celular. Empilhados, cada cartão passava de
-                290px de altura e cabiam só dois por tela. */}
-            <div className="flex flex-row flex-wrap items-center gap-2 w-full sm:w-auto mt-2 sm:mt-0 shrink-0">
-              {/* DROPDOWN MENU DE STATUS */}
-              <DropdownMenu>
-                <DropdownMenuTrigger render={
-                  <Button 
-                    variant="outline" 
-                    className={`font-bold text-xs h-9 px-3 flex items-center justify-center gap-1.5 transition-colors shrink-0 ${
-                      emCotacao
-                        ? 'border-sky-200 text-sky-800 bg-sky-50 hover:bg-sky-100'
-                        : isUrgente
-                        ? 'border-red-200 text-red-700 bg-red-100/60 hover:bg-red-100'
-                        : isAguardando
-                        ? 'border-amber-300 text-amber-900 bg-amber-100/80 hover:bg-amber-200'
-                        : 'border-slate-200 text-slate-700 bg-white hover:bg-slate-50'
-                    }`}
-                  />
-                }>
-                  {emCotacao ? (
-                    <>
-                      <FileSpreadsheet className="h-3.5 w-3.5 text-sky-700 shrink-0" />
-                      <span>Em cotação</span>
-                    </>
-                  ) : isUrgente ? (
-                    <>
-                      <AlertTriangle className="h-3.5 w-3.5 text-red-600 shrink-0" />
-                      <span>Urgente {group.prazo_original ? `(${group.prazo_original})` : ''}</span>
-                    </>
-                  ) : isAguardando ? (
-                    <>
-                      <Truck className="h-3.5 w-3.5 text-amber-700 shrink-0" />
-                      <span>Aguardando</span>
-                    </>
-                  ) : (
-                    <>
-                      <Clock className="h-3.5 w-3.5 text-slate-400 shrink-0" />
-                      <span>Definir Status</span>
-                    </>
-                  )}
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-64 p-2 shadow-xl bg-white border border-slate-200 rounded-xl">
-                  {emCotacao && (
-                    <>
-                      <DropdownMenuItem
-                        onClick={() => voltarDaCotacao([group.item_id])}
-                        className="font-bold text-sky-900 focus:bg-sky-50 cursor-pointer rounded-lg text-xs py-2"
-                      >
-                        <Undo2 className="w-3.5 h-3.5 mr-2 text-sky-700" />
-                        Voltar ao estado anterior
-                      </DropdownMenuItem>
-                      <div className="h-px bg-slate-100 my-1.5" />
-                    </>
-                  )}
-                  <OpcoesDeEstado
-                    aoEscolher={(modalidade, prazo) => mudarEstado([group.item_id], modalidade, prazo)}
-                  />
-                </DropdownMenuContent>
-              </DropdownMenu>
-
-              {/* RESOLVER / DAR BAIXA */}
-              {inlineResolveId === group.item_id ? (
-                <div className="flex items-center gap-2 bg-slate-50 p-1 rounded-lg border border-slate-200/80 shadow-md shadow-slate-200/50 w-full sm:w-auto">
-                  <Input
-                    type="number"
-                    min={0.1}
-                    max={group.total_quantidade}
-                    step={0.1}
-                    value={inlineResolveQtd}
-                    onChange={(e) => setInlineResolveQtd(e.target.value === "" ? "" : Number(e.target.value))}
-                    className="w-20 h-8 text-sm font-bold bg-white text-center"
-                    placeholder="Qtd"
-                    autoFocus
-                  />
-                  <Button
-                    size="sm"
-                    className="h-8 bg-teal-600 hover:bg-teal-700 px-3 font-bold text-white"
-                    disabled={isResolving || !inlineResolveQtd || Number(inlineResolveQtd) <= 0}
-                    onClick={() => handleResolverParcialInline(group)}
-                  >
-                    OK
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="h-8 px-2 font-medium bg-white text-slate-700"
-                    onClick={() => setInlineResolveQtd(group.total_quantidade)}
-                  >
-                    Tudo
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    className="h-8 px-2 text-slate-700 hover:text-slate-600 hover:bg-slate-200"
-                    onClick={() => setInlineResolveId(null)}
-                  >
-                    X
-                  </Button>
-                </div>
-              ) : (
-                <Button
-                  variant="ghost"
-                  onClick={() => {
-                    if (group.rupturas.length > 0 || group.manual_items.length > 1) {
-                      setResolvingGroup(group);
-                      const totalManual = group.manual_items.reduce((acc, curr) => acc + curr.quantidade, 0);
-                      setManualResolveQtd(totalManual);
-                    } else {
-                      setInlineResolveId(group.item_id);
-                      setInlineResolveQtd(group.total_quantidade);
-                    }
-                  }}
-                  className={`font-bold h-9 px-3 hover:bg-slate-100 shrink-0 ${
-                    isUrgente
-                      ? 'text-red-700 hover:text-red-800' 
-                      : isAguardando
-                      ? 'text-amber-900 hover:text-amber-950'
-                      : 'text-teal-700 hover:text-teal-800'
-                  }`}
+          )}
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-bold text-teal-950 [overflow-wrap:anywhere]">{nome}</p>
+            <p className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs text-slate-600">
+              {/* Unidade de cada falta, não a do catálogo. */}
+              <span className="font-bold text-slate-800">
+                {descreverQuantidades([...group.manual_items, ...group.rupturas])}
+              </span>
+              <span className="text-slate-300">·</span>
+              {group.rupturas.map((r) => (
+                <button
+                  key={r.id}
+                  type="button"
+                  onClick={() => navigate(`/requisicoes/${r.requisicao_id}`)}
+                  className="font-semibold text-teal-700 hover:underline"
                 >
-                  <Check className="h-4 w-4 mr-1.5 shrink-0" /> Resolver
-                </Button>
-              )}
-
-              {/* Corrigir/remover: só para linhas MANUAIS. Item de ruptura vem
-                  de uma requisição real e precisa ser tratado dentro dela. */}
-              {group.manual_items.length > 0 && group.rupturas.length === 0 && inlineResolveId !== group.item_id && (
-                <div className="flex items-center gap-1 shrink-0">
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    title="Corrigir quantidade"
-                    onClick={() => {
-                      setGrupoParaEditar(group);
-                      setNovaQtdManual(group.total_quantidade);
-                    }}
-                    className="h-9 w-9 text-slate-500 hover:text-teal-700 hover:bg-teal-50"
-                  >
-                    <Pencil className="h-4 w-4" />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    title="Remover da lista (incluído por engano)"
-                    onClick={() => setGrupoParaExcluir(group)}
-                    className="h-9 w-9 text-slate-500 hover:text-red-600 hover:bg-red-50"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
-                </div>
-              )}
-            </div>
+                  REQ #{r.requisicao?.codigo_requisicao ?? "?"}
+                </button>
+              ))}
+              {group.manual_items.length > 0 && <span>{group.rupturas.length > 0 ? "+ manual" : "Manual"}</span>}
+            </p>
+            {(urgente || etapa === "AGUARDANDO") && (
+              <span
+                className={`mt-1 inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[11px] font-bold ${
+                  urgente ? "bg-red-50 text-red-700 border-red-200" : "bg-amber-50 text-amber-800 border-amber-200"
+                }`}
+              >
+                {urgente ? <AlertTriangle className="h-3 w-3" /> : <Truck className="h-3 w-3" />}
+                {urgente ? rotuloDaUrgencia(group, nowTime) : rotuloDaPrevisao(group, nowTime)}
+              </span>
+            )}
           </div>
+          <div className="flex items-center gap-1 shrink-0">
+            {etapa === "AGUARDANDO" && !resolvendoAqui && (
+              <Button
+                variant="outline"
+                onClick={() => abrirChegou(group)}
+                className="h-8 px-2.5 text-xs font-bold text-teal-700 border-teal-200 bg-white hover:bg-teal-50 shadow-none"
+              >
+                <Check className="h-3.5 w-3.5" /> Chegou
+              </Button>
+            )}
+            {menuDoItem(group, etapa, nome)}
           </div>
         </div>
+
+        {/* Baixa na hora: já vem com a quantidade toda; chegou só parte, muda o número. */}
+        {resolvendoAqui && (
+          <div className="flex flex-wrap items-center gap-2 pl-4 pr-3 pb-3">
+            <span className="text-xs font-bold text-slate-600">Chegou</span>
+            <Input
+              type="number"
+              inputMode="decimal"
+              min={0.1}
+              max={group.total_quantidade}
+              step="any"
+              value={inlineResolveQtd}
+              onChange={(e) => setInlineResolveQtd(e.target.value === "" ? "" : Number(e.target.value))}
+              aria-label={`Quantidade que chegou de ${nome}`}
+              className="w-20 h-8 text-sm font-bold bg-white text-center"
+              autoFocus
+            />
+            <Button
+              size="sm"
+              className="h-8 bg-teal-600 hover:bg-teal-700 px-3 font-bold text-white shadow-none"
+              disabled={isResolving || !inlineResolveQtd || Number(inlineResolveQtd) <= 0}
+              onClick={() => handleResolverParcialInline(group)}
+            >
+              Dar baixa
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              aria-label="Cancelar"
+              className="h-8 w-8 p-0 text-slate-500 hover:bg-slate-100"
+              onClick={() => setInlineResolveId(null)}
+            >
+              <X className="h-4 w-4" />
+            </Button>
+          </div>
+        )}
       </div>
     );
   };
 
+  const contagem: Record<EtapaReposicao, number> = {
+    COMPRAR: porEtapa.COMPRAR.length,
+    COTACAO: porEtapa.COTACAO.length,
+    AGUARDANDO: porEtapa.AGUARDANDO.length,
+  };
+  const idsAComprar = porEtapa.COMPRAR.map((g) => g.item_id);
+  const marcadosAComprar =
+    etapaMarcada === "COMPRAR" ? idsAComprar.filter((id) => selecionados.has(id)).length : 0;
+
   return (
     <>
-      <div className="space-y-6 max-w-4xl mx-auto pb-10 print:hidden">
-        
-        {/* CABEÇALHO */}
-        <div>
-          <h1 className={TITULO}>Lista de Reposição</h1>
-        </div>
+      <div className="space-y-4 max-w-6xl mx-auto pb-10 print:hidden">
+        <h1 className={TITULO}>Lista de Reposição</h1>
 
-        {/* BARRA DE AÇÕES — uma linha, no padrão das outras telas: a busca
-            ocupa o espaço livre e a ação principal fica logo ao lado dela. */}
+        {/* BARRA DE AÇÕES: a busca ocupa o espaço livre, a ação principal ao lado. */}
         <div className="flex flex-col sm:flex-row gap-2">
           <CampoBusca
             valor={searchTerm}
@@ -1026,7 +931,6 @@ export default function ListaReposicao() {
             placeholder="Buscar item..."
             className="flex-1"
           />
-
           <div className="flex items-center gap-2">
             <Button
               onClick={() => setShowAddModal(true)}
@@ -1039,7 +943,8 @@ export default function ListaReposicao() {
               onClick={handlePrint}
               type="button"
               variant="outline"
-              title="Imprimir lista para cotação"
+              title="Imprimir a lista"
+              aria-label="Imprimir a lista"
               className={BOTAO_ICONE}
             >
               <Printer className="w-4 h-4" />
@@ -1048,130 +953,155 @@ export default function ListaReposicao() {
               onClick={() => setShowHistoryModal(true)}
               variant="outline"
               title="Histórico de baixas"
+              aria-label="Histórico de baixas"
               className={BOTAO_ICONE}
             >
               <History className="w-4 h-4" />
             </Button>
           </div>
         </div>
-        {/* CONTEÚDO PRINCIPAL (ACCORDION DE 3 MODALIDADES) */}
+
         {isLoading ? (
-          <div className="text-center py-10 text-slate-700">
-            <div className="animate-pulse space-y-4">
-              <div className="h-20 bg-slate-200 rounded-2xl"></div>
-              <div className="h-20 bg-slate-200 rounded-2xl"></div>
-              <div className="h-20 bg-slate-200 rounded-2xl"></div>
-            </div>
+          <div className="animate-pulse space-y-4">
+            <div className="h-20 bg-slate-200 rounded-2xl"></div>
+            <div className="h-20 bg-slate-200 rounded-2xl"></div>
           </div>
-        ) : displayedItems.length === 0 ? (
+        ) : groupedItems.length === 0 ? (
           <div className="text-center py-16 bg-white border border-slate-200/80 shadow-md shadow-slate-200/50 border-dashed rounded-3xl">
             <div className="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-4">
               <CheckCircle2 className="w-8 h-8 text-teal-500" />
             </div>
-            <p className="text-slate-700 mb-1 font-bold">Nenhum item pendente de reposição.</p>
-            <p className="text-sm font-medium text-slate-600">O estoque e as requisições estão em dia!</p>
+            <p className="text-slate-700 font-bold">Nenhum item para repor.</p>
           </div>
         ) : (
-          <div className="space-y-4">
-            
-            <SecaoReposicao
-              modalidade="URGENTE"
-              titulo="Itens Urgentes"
-              icone={<AlertTriangle className="w-5 h-5" />}
-              grupos={itensUrgentes}
-              aberta={openSections.URGENTE}
-              onToggle={() => toggleSection("URGENTE")}
-              renderCard={renderItemCard}
-              selecionados={selecionados}
-              aoAlternarTodos={alternarVarios}
-            />
-
-            <SecaoReposicao
-              modalidade="COTACAO"
-              titulo="Em cotação"
-              icone={<FileSpreadsheet className="w-5 h-5" />}
-              grupos={itensEmCotacao}
-              aberta={openSections.COTACAO}
-              onToggle={() => toggleSection("COTACAO")}
-              renderCard={renderItemCard}
-              selecionados={selecionados}
-              aoAlternarTodos={alternarVarios}
-              corpo={lotesDeCotacao.map((l) => {
-                const ids = l.grupos.map((g) => g.item_id);
-                const marcados = ids.filter((id) => selecionados.has(id)).length;
+          <>
+            {/* Celular: uma etapa por vez, nas abas (o mesmo padrão de Requisições). */}
+            <div role="tablist" aria-label="Etapas da compra" className={`${ABAS_FILA} lg:hidden`}>
+              {ETAPAS.map(({ etapa, curto }) => {
+                const ativa = etapa === etapaAtiva;
                 return (
-                  <div key={l.lote}>
-                    {/* Um subgrupo por cópia para a planilha. */}
-                    <div className="pl-4 pr-2 py-2 bg-sky-50/70 flex flex-wrap items-center gap-x-3 gap-y-1">
-                      <CaixaDeMarcar
-                        marcado={marcados === ids.length}
-                        parcial={marcados > 0}
-                        aoMudar={() => alternarVarios(ids)}
-                        rotulo="Marcar todos desta cotação"
-                      />
-                      <p className="flex-1 min-w-[10rem] text-sm font-bold text-sky-900">
-                        {l.em ? `Copiados em ${format(new Date(l.em), "dd/MM 'às' HH:mm")}` : "Em cotação"}
-                        <span className="font-medium text-sky-800"> · {contarItens(ids.length)}</span>
-                      </p>
-                      <div className="flex items-center gap-1 ml-auto">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => copiarLoteDeNovo(l.grupos)}
-                          title="Copiar estes itens de novo para a planilha"
-                          className="h-9 px-2.5 text-xs font-bold text-sky-900 hover:bg-sky-100"
-                        >
-                          <Copy className="h-3.5 w-3.5 mr-1.5" /> Copiar de novo
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          disabled={aplicando}
-                          onClick={() => voltarDaCotacao(ids)}
-                          title="Todos voltam ao estado de antes da cotação"
-                          className="h-9 px-2.5 text-xs font-bold text-sky-900 hover:bg-sky-100"
-                        >
-                          <Undo2 className="h-3.5 w-3.5 mr-1.5" /> Voltar todos
-                        </Button>
-                      </div>
-                    </div>
-                    <div className="divide-y divide-slate-100">
-                      {l.grupos.map((g) => renderItemCard(g))}
-                    </div>
-                  </div>
+                  <button
+                    key={etapa}
+                    type="button"
+                    role="tab"
+                    aria-selected={ativa}
+                    onClick={() => trocarEtapa(etapa)}
+                    className={`${ABA_FILA} ${ativa ? ABA_ATIVA : ABA_INATIVA}`}
+                  >
+                    <span>{curto}</span>
+                    <span className={`tabular-nums text-xs ${ativa ? "text-teal-700" : "text-slate-500"}`}>
+                      {contagem[etapa]}
+                    </span>
+                  </button>
                 );
               })}
-            />
+            </div>
 
-            <SecaoReposicao
-              modalidade="AGUARDANDO"
-              titulo="Aguardando Chegada"
-              icone={<Truck className="w-5 h-5" />}
-              grupos={itensAguardando}
-              aberta={openSections.AGUARDANDO}
-              onToggle={() => toggleSection("AGUARDANDO")}
-              renderCard={renderItemCard}
-              selecionados={selecionados}
-              aoAlternarTodos={alternarVarios}
-            />
+            {searchTerm.trim() && displayedItems.length === 0 && (
+              <p className="text-sm text-slate-600 [overflow-wrap:anywhere]">
+                Nenhum item com “{searchTerm.trim()}”.
+              </p>
+            )}
 
-            <SecaoReposicao
-              modalidade="NORMAL"
-              titulo="Itens Normais"
-              icone={<Package className="w-5 h-5" />}
-              grupos={itensNormais}
-              aberta={openSections.NORMAL}
-              onToggle={() => toggleSection("NORMAL")}
-              renderCard={renderItemCard}
-              selecionados={selecionados}
-              aoAlternarTodos={alternarVarios}
-            />
+            {/* Computador: os três blocos lado a lado, na ordem da compra. */}
+            <div className="lg:grid lg:grid-cols-3 lg:gap-4 lg:items-start">
+              <Bloco
+                titulo="A comprar"
+                icone={<ShoppingCart />}
+                total={contagem.COMPRAR}
+                visivelNoCelular={etapaAtiva === "COMPRAR"}
+                marcarTodos={{
+                  marcado: idsAComprar.length > 0 && marcadosAComprar === idsAComprar.length,
+                  parcial: marcadosAComprar > 0,
+                  aoMudar: () => alternarVarios(idsAComprar, "COMPRAR"),
+                }}
+              >
+                {porEtapa.COMPRAR.map((g) => renderItem(g, "COMPRAR"))}
+              </Bloco>
 
-          </div>
+              <Bloco
+                titulo="Em cotação"
+                icone={<FileSpreadsheet />}
+                total={contagem.COTACAO}
+                visivelNoCelular={etapaAtiva === "COTACAO"}
+              >
+                {lotesDeCotacao.map((l) => {
+                  const ids = l.grupos.map((g) => g.item_id);
+                  const marcados = etapaMarcada === "COTACAO" ? ids.filter((id) => selecionados.has(id)).length : 0;
+                  return (
+                    <div key={l.lote}>
+                      {/* Uma cópia para a planilha: o pedido costuma sair junto. */}
+                      <div className="flex items-center gap-2 pl-4 pr-2 py-2 bg-slate-50">
+                        <CaixaDeMarcar
+                          marcado={marcados === ids.length}
+                          parcial={marcados > 0}
+                          aoMudar={() => alternarVarios(ids, "COTACAO")}
+                          rotulo="Marcar todos desta cópia"
+                        />
+                        <p className="flex-1 min-w-0 truncate text-xs font-bold text-slate-600">
+                          {l.em ? `Cópia ${format(new Date(l.em), "dd/MM HH:mm")}` : "Cópia"}
+                          <span className="font-medium text-slate-500"> · {ids.length}</span>
+                        </p>
+                        <DropdownMenu>
+                          <DropdownMenuTrigger
+                            disabled={aplicando}
+                            render={
+                              <Button className="h-8 px-2.5 text-xs bg-teal-600 hover:bg-teal-700 font-bold text-white shadow-none" />
+                            }
+                          >
+                            <Truck className="h-3.5 w-3.5" /> Pedido feito
+                            <ChevronDown className="h-3.5 w-3.5" />
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end" className="w-56 p-1.5 bg-white border border-slate-200 rounded-xl shadow-lg">
+                            <TituloDoMenu>Previsão de chegada</TituloDoMenu>
+                            <OpcoesDePrevisao aoEscolher={(p) => pedidoFeito(ids, p)} />
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                        <DropdownMenu>
+                          <DropdownMenuTrigger
+                            render={
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                aria-label="Opções desta cópia"
+                                className="h-8 w-8 shrink-0 text-slate-500 hover:text-slate-800 hover:bg-slate-100"
+                              />
+                            }
+                          >
+                            <MoreHorizontal className="h-4 w-4" />
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end" className="w-56 p-1.5 bg-white border border-slate-200 rounded-xl shadow-lg">
+                            <DropdownMenuItem onClick={() => copiarLoteDeNovo(l.grupos)} className={ITEM_DO_MENU}>
+                              <Copy className="h-3.5 w-3.5 mr-2 text-slate-500" /> Copiar de novo
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => voltarParaComprar(ids, "COTACAO")} className={ITEM_DO_MENU}>
+                              <Undo2 className="h-3.5 w-3.5 mr-2 text-slate-500" /> Voltar todos para A comprar
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </div>
+                      <div className="divide-y divide-slate-100 border-t border-slate-100">
+                        {l.grupos.map((g) => renderItem(g, "COTACAO"))}
+                      </div>
+                    </div>
+                  );
+                })}
+              </Bloco>
+
+              <Bloco
+                titulo="Aguardando entrega"
+                icone={<Truck />}
+                total={contagem.AGUARDANDO}
+                visivelNoCelular={etapaAtiva === "AGUARDANDO"}
+              >
+                {porEtapa.AGUARDANDO.map((g) => renderItem(g, "AGUARDANDO"))}
+              </Bloco>
+            </div>
+          </>
         )}
 
-        {/* BARRA DOS MARCADOS: fica presa ao pé da tela enquanto a lista rola. */}
-        {gruposMarcados.length > 0 && (
+        {/* BARRA DOS MARCADOS: a ação da etapa, presa ao pé da tela. */}
+        {gruposMarcados.length > 0 && etapaMarcada && etapaMarcada !== "AGUARDANDO" && (
           <div className="sticky bottom-3 z-20 mx-auto flex w-fit max-w-full items-center gap-1 rounded-xl border border-slate-200 bg-white p-1.5 shadow-md">
             <button
               type="button"
@@ -1185,42 +1115,64 @@ export default function ListaReposicao() {
             <p className="mr-1.5 whitespace-nowrap text-sm font-bold text-slate-700">
               {gruposMarcados.length}
               <span className="max-[359px]:hidden"> {gruposMarcados.length === 1 ? "item" : "itens"}</span>
-              <span className="hidden sm:inline"> {gruposMarcados.length === 1 ? "marcado" : "marcados"}</span>
             </p>
-            <Button
-              onClick={copiarECotar}
-              disabled={aplicando}
-              className="h-8 px-2.5 bg-teal-600 hover:bg-teal-700 font-bold text-white shadow-none"
-            >
-              <Copy className="h-3.5 w-3.5 max-[359px]:hidden" />
-              <span className="sm:hidden">Copiar</span>
-              <span className="hidden sm:inline">Copiar para cotação</span>
-            </Button>
-            <DropdownMenu>
-              <DropdownMenuTrigger
-                disabled={aplicando}
-                render={<Button variant="outline" className="h-8 px-2.5 font-bold text-slate-700 shadow-none" />}
-              >
-                <span className="sm:hidden">Estado</span>
-                <span className="hidden sm:inline">Mudar estado</span>
-                <ChevronDown className="h-3.5 w-3.5" />
-              </DropdownMenuTrigger>
-              <DropdownMenuContent side="top" align="end" className="w-64 p-2 shadow-xl bg-white border border-slate-200 rounded-xl">
-                <OpcoesDeEstado aoEscolher={(modalidade, prazo) => mudarEstado(idsMarcados, modalidade, prazo)} />
-              </DropdownMenuContent>
-            </DropdownMenu>
-            {algumMarcadoEmCotacao && (
-              <Button
-                variant="outline"
-                onClick={() => voltarDaCotacao(idsMarcados)}
-                disabled={aplicando}
-                aria-label="Voltar ao estado anterior"
-                title="Tira da cotação e volta ao estado de antes"
-                className="h-8 px-2 sm:px-2.5 font-bold text-slate-700 shadow-none"
-              >
-                <Undo2 className="h-3.5 w-3.5" />
-                <span className="hidden sm:inline">Estado anterior</span>
-              </Button>
+            {etapaMarcada === "COMPRAR" ? (
+              <>
+                <Button
+                  onClick={copiarECotar}
+                  disabled={aplicando}
+                  className="h-8 px-2.5 bg-teal-600 hover:bg-teal-700 font-bold text-white shadow-none"
+                >
+                  <Copy className="h-3.5 w-3.5 max-[359px]:hidden" />
+                  <span className="sm:hidden">Copiar</span>
+                  <span className="hidden sm:inline">Copiar para cotação</span>
+                </Button>
+                <DropdownMenu>
+                  <DropdownMenuTrigger
+                    disabled={aplicando}
+                    render={<Button variant="outline" className="h-8 px-2.5 font-bold text-slate-700 shadow-none" />}
+                  >
+                    Mais <ChevronDown className="h-3.5 w-3.5" />
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent side="top" align="end" className="w-60 p-1.5 bg-white border border-slate-200 rounded-xl shadow-lg">
+                    <TituloDoMenu>Já pedido, sem cotação</TituloDoMenu>
+                    <OpcoesDePrevisao aoEscolher={(p) => pedidoFeito(idsMarcados, p)} />
+                    {SEPARADOR_DO_MENU}
+                    <TituloDoMenu>Urgente</TituloDoMenu>
+                    <OpcoesDeUrgencia
+                      urgente={gruposMarcados.some(ehUrgente)}
+                      aoEscolher={(p) => mudarUrgencia(idsMarcados, p)}
+                    />
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </>
+            ) : (
+              <>
+                <DropdownMenu>
+                  <DropdownMenuTrigger
+                    disabled={aplicando}
+                    render={<Button className="h-8 px-2.5 bg-teal-600 hover:bg-teal-700 font-bold text-white shadow-none" />}
+                  >
+                    <Truck className="h-3.5 w-3.5 max-[359px]:hidden" /> Pedido feito
+                    <ChevronDown className="h-3.5 w-3.5" />
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent side="top" align="end" className="w-56 p-1.5 bg-white border border-slate-200 rounded-xl shadow-lg">
+                    <TituloDoMenu>Previsão de chegada</TituloDoMenu>
+                    <OpcoesDePrevisao aoEscolher={(p) => pedidoFeito(idsMarcados, p)} />
+                  </DropdownMenuContent>
+                </DropdownMenu>
+                <Button
+                  variant="outline"
+                  onClick={() => voltarParaComprar(idsMarcados, "COTACAO")}
+                  disabled={aplicando}
+                  aria-label="Voltar para A comprar"
+                  title="Voltar para A comprar"
+                  className="h-8 px-2 sm:px-2.5 font-bold text-slate-700 shadow-none"
+                >
+                  <Undo2 className="h-3.5 w-3.5" />
+                  <span className="hidden sm:inline">Voltar</span>
+                </Button>
+              </>
             )}
           </div>
         )}
@@ -1293,9 +1245,9 @@ export default function ListaReposicao() {
             <div className="w-12 h-12 bg-white rounded-xl shadow-lg shadow-slate-200/50 border border-slate-200/80 flex items-center justify-center mb-4">
               <CheckSquare className="w-6 h-6 text-slate-700" />
             </div>
-            <DialogTitle className="text-2xl font-black text-slate-800 mb-2">Fontes de Reposição</DialogTitle>
-            <DialogDescription className="text-slate-700 text-base">
-              Deseja dar baixa para o item <span className="font-bold text-slate-800">{formatItemName(resolvingGroup?.item?.nome)}</span>?
+            <DialogTitle className="text-xl font-black text-slate-800 mb-1">Chegou</DialogTitle>
+            <DialogDescription className="text-slate-700 text-base font-bold">
+              {formatItemName(resolvingGroup?.item?.nome)}
             </DialogDescription>
           </div>
           
@@ -1420,9 +1372,8 @@ export default function ListaReposicao() {
               <span className="font-bold text-slate-800">
                 {formatItemName(grupoParaExcluir?.item?.nome)}
               </span>{" "}
-              sai da lista sem registrar baixa no histórico. Use isto quando o
-              item foi incluído por engano — se o material chegou, use
-              "Resolver" para ficar registrado.
+              sai da lista sem baixa no histórico. Se o material chegou, use
+              "Chegou".
             </DialogDescription>
           </DialogHeader>
           <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-2 pt-2">

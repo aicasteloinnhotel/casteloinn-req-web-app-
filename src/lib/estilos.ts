@@ -34,5 +34,11 @@ export const ABA = "flex-1 flex items-center justify-center gap-2 px-3 rounded-m
 export const ABA_ATIVA = "bg-white text-slate-800 shadow-sm";
 export const ABA_INATIVA = "text-slate-600 hover:text-slate-800";
 
+/** Abas de uma fila com contagem (Requisições, Reposição): quebram em duas
+ *  linhas no celular em vez de cortar o nome. */
+export const ABAS_FILA = "flex flex-wrap gap-1 p-1 bg-slate-100 rounded-lg border border-slate-200 sm:flex-nowrap sm:h-11";
+export const ABA_FILA =
+  "flex flex-auto sm:flex-1 items-center justify-center gap-1.5 sm:gap-2 h-9 sm:h-auto px-2.5 sm:px-3 rounded-md text-[13px] sm:text-sm font-bold whitespace-nowrap transition-colors";
+
 /** Título de toda tela. Sem subtítulo: o nome da tela já diz o que ela é. */
 export const TITULO = "text-2xl sm:text-3xl font-bold tracking-tight text-teal-900";

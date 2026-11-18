@@ -296,6 +296,14 @@ export async function definirEstadoDosItens(itemIds: string[], modalidade: Modal
   });
 }
 
+/**
+ * Marca ou tira a urgência SEM tirar da cotação: urgência é marca do item, não
+ * etapa. Sem prazo = tira a urgência (volta a normal).
+ */
+export async function definirUrgencia(itemIds: string[], prazo?: string) {
+  await atualizarItensAbertos(itemIds, { ...camposDoEstado(prazo ? "URGENTE" : "NORMAL", prazo) });
+}
+
 /** Põe na cotação, num subgrupo novo (uma cópia para a planilha). */
 export async function moverParaCotacao(itemIds: string[]): Promise<string> {
   const lote = crypto.randomUUID();

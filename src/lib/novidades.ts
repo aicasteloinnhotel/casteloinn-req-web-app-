@@ -43,6 +43,24 @@ export const ROTULO_TIPO: Record<TipoMudanca, string> = {
 
 export const VERSOES: Versao[] = [
   {
+    versao: "1.9",
+    data: "18/11/2026",
+    titulo: "Lista de Reposição por etapas",
+    mudancas: [
+      {
+        tipo: "melhoria",
+        publico: "almoxarifado",
+        texto:
+          "Lista de Reposição em três blocos, na ordem da compra: A comprar, Em cotação e Aguardando entrega. Cada bloco tem o seu próximo passo: Copiar para cotação, Pedido feito e Chegou.",
+      },
+      {
+        tipo: "melhoria",
+        publico: "almoxarifado",
+        texto: "Urgente agora é uma marca vermelha no item, que sobe para o topo do bloco.",
+      },
+    ],
+  },
+  {
     versao: "1.8",
     data: "12/11/2026",
     titulo: "Nova Requisição mais fácil no celular",

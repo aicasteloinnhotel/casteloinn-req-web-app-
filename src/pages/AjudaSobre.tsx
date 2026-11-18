@@ -440,7 +440,7 @@ export default function AjudaSobre() {
                     material entra na <strong>Lista de Reposição</strong>.
                   </p>
                   <p>
-                    Quando chegar, abra a complementar — ou toque em <strong>Resolver</strong> na
+                    Quando chegar, abra a complementar — ou toque em <strong>Chegou</strong> na
                     Lista de Reposição — e separe normalmente.
                   </p>
                   <p>
@@ -515,22 +515,23 @@ export default function AjudaSobre() {
                     em <strong>Adicionar item</strong>.
                   </p>
                   <p>
-                    Em <strong>Definir Status</strong>, marque como urgente (com prazo) ou como já
-                    pedido ao fornecedor. <strong>Resolver</strong> dá baixa, inclusive de parte da
-                    quantidade. O ícone de relógio mostra o histórico de baixas, e a impressora gera
-                    a lista para cotação.
+                    Os itens seguem as etapas da compra, em três blocos (no celular, em abas):{" "}
+                    <strong>A comprar</strong> → <strong>Em cotação</strong> →{" "}
+                    <strong>Aguardando entrega</strong>. Quando chega, toque em{" "}
+                    <strong>Chegou</strong> e o item vai para o histórico (ícone de relógio). Dá para
+                    dar baixa de parte da quantidade.
                   </p>
                   <p>
-                    Para mexer em vários, marque o círculo de cada item (o do título marca a seção
-                    inteira) e use a barra de baixo: <strong>Mudar estado</strong> vale para todos os
-                    marcados, e <strong>Desfazer</strong> aparece logo depois de cada mudança.
+                    Para cotar, marque os itens em A comprar e toque em{" "}
+                    <strong>Copiar para cotação</strong>: na planilha, clique em <strong>B3</strong> e
+                    cole com Ctrl+V. Fechou com o fornecedor? Em Em cotação, toque em{" "}
+                    <strong>Pedido feito</strong> e escolha a previsão de chegada.
                   </p>
                   <p>
-                    Para cotar, marque os itens e toque em <strong>Copiar para cotação</strong>: na
-                    planilha, clique em <strong>B3</strong> e cole com Ctrl+V. Eles passam para{" "}
-                    <strong>Em cotação</strong>, em um subgrupo por cópia. Dali, copie de novo,
-                    volte um item ou todos ao estado anterior, ou mude o estado (já pedido, por
-                    exemplo).
+                    <strong>Urgente</strong> é uma marca, não uma etapa: o item fica em vermelho no
+                    topo do bloco. Ela, voltar de etapa, corrigir e remover ficam no{" "}
+                    <strong>⋯</strong> de cada item. <strong>Desfazer</strong> aparece logo depois
+                    de cada mudança.
                   </p>
                 </Topico>
 

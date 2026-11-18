@@ -8,7 +8,7 @@ import { ORDEM_PADRAO, ORDENS, ehOrdem, ordenarEmGrupos, type OrdemRequisicoes }
 import {
   ABA_PADRAO, abaDoAtalho, abasPara, casaComBusca, ehAba, estaNaAba, numeroDaBusca, type AbaRequisicoes,
 } from "@/lib/abasRequisicoes";
-import { ABA_ATIVA, ABA_INATIVA, BOTAO_ICONE, BOTAO_ICONE_LIGADO, BOTAO_PRIMARIO, CAMPO, TITULO } from "@/lib/estilos";
+import { ABA_ATIVA, ABA_FILA, ABA_INATIVA, ABAS_FILA, BOTAO_ICONE, BOTAO_ICONE_LIGADO, BOTAO_PRIMARIO, CAMPO, TITULO } from "@/lib/estilos";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Plus, RefreshCcw, Filter, FilterX, X, ArrowLeft, ArrowUpDown, Check, Search } from "lucide-react";
@@ -34,8 +34,6 @@ type FiltroLancamento = "TODOS" | "A_LANCAR" | "LANCADAS";
 // A mesma aba do resto do app (ABA), mas no celular cada uma tem a largura do
 // nome e a linha quebra quando falta espaço: em colunas iguais, "Aguardando"
 // era cortado.
-const ABA_DA_FILA =
-  "flex flex-auto sm:flex-1 items-center justify-center gap-1.5 sm:gap-2 h-9 sm:h-auto px-2.5 sm:px-3 rounded-md text-[13px] sm:text-sm font-bold whitespace-nowrap transition-colors";
 
 
 const ROTULO_DO_CAMPO ="text-[10px] font-bold text-slate-700 uppercase tracking-wider mb-1 block";
@@ -268,7 +266,7 @@ export default function ListaRequisicoes() {
       <div
         role="tablist"
         aria-label="Requisições por situação"
-        className="flex flex-wrap gap-1 p-1 bg-slate-100 rounded-lg border border-slate-200 sm:flex-nowrap sm:h-11"
+        className={ABAS_FILA}
       >
         {abas.map((a) => {
           const ativa = !buscaAdiada && a.aba === aba;
@@ -279,7 +277,7 @@ export default function ListaRequisicoes() {
               role="tab"
               aria-selected={ativa}
               onClick={() => trocarAba(a.aba)}
-              className={`${ABA_DA_FILA} ${ativa ? ABA_ATIVA : ABA_INATIVA}`}
+              className={`${ABA_FILA} ${ativa ? ABA_ATIVA : ABA_INATIVA}`}
             >
               <span>{a.rotulo}</span>
               {a.conta && (
