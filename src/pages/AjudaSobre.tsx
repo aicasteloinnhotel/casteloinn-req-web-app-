@@ -248,7 +248,7 @@ export default function AjudaSobre() {
                   {ehAlmoxarifado ? (
                     <>No menu, toque em <strong>Nova Requisição</strong>.</>
                   ) : (
-                    <>Na tela inicial, toque em <strong>Nova Requisição</strong>.</>
+                    <>Na tela inicial, toque em <strong>Fazer um pedido</strong>.</>
                   )}
                 </li>
                 <li>
@@ -261,22 +261,24 @@ export default function AjudaSobre() {
                   lista para ver todos.
                 </li>
                 <li>
-                  Toque no material: ali mesmo escolha a <strong>unidade</strong> (obrigatória) e a{" "}
-                  <strong>quantidade</strong>, e toque em <strong>Adicionar</strong>. Só aparecem as
-                  unidades cadastradas para aquele material — por exemplo, carne em Unidade ou Quilo.
+                  Toque no material. Sobe uma janela embaixo: <strong>1</strong> escolha a unidade
+                  (Caixa, Quilo…), <strong>2</strong> a quantidade no − e +, e toque no botão verde
+                  (ele diz o que vai entrar, por exemplo “Adicionar 2 caixas”).
                 </li>
                 <li>
                   Repita para cada material. O que já está no pedido aparece marcado na busca.
+                  Tirou um item sem querer? Toque em <strong>Desfazer</strong> no aviso.
                 </li>
                 <li>
                   Confira a lista (dá para mudar a quantidade e a unidade ali mesmo) e toque em{" "}
-                  <strong>Enviar requisição</strong>, no pé da tela.
+                  <strong>{ehAlmoxarifado ? "Enviar requisição" : "Enviar pedido"}</strong>, no pé da tela.
                 </li>
               </Passos>
               <p>
-                Esqueceu de avisar algo? Abra a requisição e toque em <strong>Editar</strong> na
-                caixa de observação (ou <strong>Adicionar observação</strong>), enquanto ela ainda
-                está pendente. O almoxarifado pode editar a qualquer momento.
+                Esqueceu de avisar algo? Abra o pedido e toque em <strong>Editar</strong> na
+                caixa de observação (ou <strong>Adicionar observação</strong>), enquanto o
+                almoxarifado ainda não começou. Para mudar os itens, <strong>Editar pedido</strong>;
+                para desistir, <strong>Cancelar este pedido</strong>, no fim da tela.
               </p>
               <Dica>
                 Se sair da tela no meio do pedido, os itens ficam guardados neste aparelho até você
@@ -288,8 +290,15 @@ export default function AjudaSobre() {
             <Topico icone={<Eye />} titulo="Como acompanhar o pedido">
               <Passos>
                 <li>
-                  Toque em <strong>{ehAlmoxarifado ? "Requisições" : "Minhas Requisições"}</strong>.
-                  A lista se atualiza sozinha, sem precisar recarregar.
+                  {ehAlmoxarifado ? (
+                    <>Toque em <strong>Requisições</strong>. A lista se atualiza sozinha.</>
+                  ) : (
+                    <>
+                      Os pedidos em andamento já aparecem na tela inicial, com o andamento em
+                      palavras simples (Enviado, Separando, Entregue). Para ver todos, toque em{" "}
+                      <strong>Ver todos os meus pedidos</strong>.
+                    </>
+                  )}
                 </li>
                 <li>
                   Toque num pedido para ver os itens, o que foi separado e o histórico com cada
@@ -310,8 +319,18 @@ export default function AjudaSobre() {
 
             <Topico icone={<PenLine />} titulo="Como corrigir ou cancelar um pedido">
               <p>
-                Enquanto o pedido estiver <StatusBadge status="PENDENTE" />, abra-o e toque em{" "}
-                <strong>Editar Requisição</strong> ou <strong>Cancelar</strong>.
+                {ehAlmoxarifado ? (
+                  <>
+                    Enquanto o pedido estiver <StatusBadge status="PENDENTE" />, abra-o e toque em{" "}
+                    <strong>Editar Requisição</strong> ou <strong>Cancelar</strong>.
+                  </>
+                ) : (
+                  <>
+                    Enquanto o pedido estiver <strong>Enviado</strong> (o almoxarifado ainda não
+                    começou), abra-o: no fim da tela ficam <strong>Editar pedido</strong> e, separado,{" "}
+                    <strong>Cancelar este pedido</strong>, que pede confirmação.
+                  </>
+                )}
               </p>
               <p>
                 Depois que a separação começa, só o almoxarifado consegue alterar. Fale com ele pelo

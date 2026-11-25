@@ -7,6 +7,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { Requisicao } from "@/types";
 import { isLockAtivo } from "@/services/api";
 import { StatusBadge } from "@/components/StatusBadge";
+import { EtiquetaStatus } from "@/components/StatusSimples";
 import { contemTexto, foiEntregue, formatItemName, precisaLancar, unidadeDoItem } from "@/lib/utils";
 import { formatarQtd, quantidadeDevolvida, quantidadeQueSaiu, unidadeEntregue } from "@/lib/unidades";
 import { useNavigate } from "react-router-dom";
@@ -54,6 +55,8 @@ export const RequisicaoCard = React.memo(({ req, buscaItem }: { req: Requisicao;
 
   // Observação visível já na lista: dá para ver o aviso antes de abrir.
   const obsNaLista = textoDaObservacao(req.observacao);
+  // Para quem pediu, o status em palavras simples ("Enviado", "Entregue").
+  const paraQuemPediu = user?.perfil === "SOLICITANTE";
   // A trava expira: sem checar o tempo, uma separação abandonada deixava o
   // selo "Em Atendimento" na lista para sempre.
   const isLockedByOther =
@@ -154,21 +157,29 @@ export const RequisicaoCard = React.memo(({ req, buscaItem }: { req: Requisicao;
       <CardContent className="lg:hidden px-3.5 py-3 space-y-1.5">
         <div className="flex items-start justify-between gap-2">
           <p className="min-w-0 text-sm leading-snug text-slate-800 break-words">
-            <span className="font-black">#{req.codigo_requisicao}</span>
-            <span className="text-slate-300"> · </span>
-            <span className="font-bold">{req.departamento}</span>
+            {/* Quem pediu não precisa ler o próprio setor e o próprio nome. */}
+            {paraQuemPediu ? (
+              <span className="text-base font-black">Pedido #{req.codigo_requisicao}</span>
+            ) : (
+              <>
+                <span className="font-black">#{req.codigo_requisicao}</span>
+                <span className="text-slate-300"> · </span>
+                <span className="font-bold">{req.departamento}</span>
+              </>
+            )}
           </p>
           {/* min-w-0: com ruptura + lançamento são três pílulas, e elas
               precisam poder quebrar linha no celular. */}
           <div className="min-w-0 flex flex-wrap items-center justify-end gap-1">
-            <StatusBadge status={req.status} />
+            {paraQuemPediu ? <EtiquetaStatus status={req.status} /> : <StatusBadge status={req.status} />}
             {pilulaLancamento}
             {pilulaEmAtendimento}
           </div>
         </div>
         <div className="flex items-center justify-between gap-2">
           <p className="min-w-0 truncate text-xs text-slate-600">
-            {req.usuario?.nome || "---"} · {qtdItens} {qtdItens === 1 ? "item" : "itens"} · {pedidaEm}
+            {!paraQuemPediu && `${req.usuario?.nome || "---"} · `}
+            {qtdItens} {qtdItens === 1 ? "item" : "itens"} · {pedidaEm}
           </p>
           <button
             type="button"
@@ -196,7 +207,7 @@ export const RequisicaoCard = React.memo(({ req, buscaItem }: { req: Requisicao;
           <span className="text-center font-semibold text-slate-700 tabular-nums">{qtdItens}</span>
           <span className="text-slate-600 tabular-nums">{pedidaEm}</span>
           <div className="flex flex-wrap items-center justify-end gap-1">
-            <StatusBadge status={req.status} />
+            {paraQuemPediu ? <EtiquetaStatus status={req.status} /> : <StatusBadge status={req.status} />}
             {pilulaLancamento}
             {pilulaEmAtendimento}
           </div>

@@ -43,6 +43,28 @@ export const ROTULO_TIPO: Record<TipoMudanca, string> = {
 
 export const VERSOES: Versao[] = [
   {
+    versao: "1.13",
+    data: "25/11/2026",
+    titulo: "Pedir ficou mais fácil",
+    mudancas: [
+      {
+        tipo: "melhoria",
+        texto:
+          "Tela inicial nova: o botão “Fazer um pedido” e, logo abaixo, como estão os seus pedidos (Enviado, Separando, Entregue).",
+      },
+      {
+        tipo: "melhoria",
+        texto:
+          "Ao tocar no material, sobe uma janela com um passo de cada vez: a unidade, a quantidade e um botão que diz o que vai entrar (“Adicionar 2 caixas”). Tirou sem querer? “Desfazer”.",
+      },
+      {
+        tipo: "melhoria",
+        texto:
+          "No pedido aberto, o andamento aparece numa linha (Enviado → Separando → Entregue). “Editar pedido” ficou grande, e “Cancelar” separado e com confirmação.",
+      },
+    ],
+  },
+  {
     versao: "1.12.1",
     data: "18/11/2026",
     titulo: "Importar orçamento mais simples",

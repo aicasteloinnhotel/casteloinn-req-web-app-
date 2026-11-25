@@ -4,23 +4,14 @@ import { useAuth } from "@/contexts/AuthContext";
 import { getItens, createRequisicao, getUsuarios, getRequisicao, updateRequisicaoCompleta } from "@/services/api";
 import { Item } from "@/types";
 import { Button } from "@/components/ui/button";
-import { Trash2, Plus, Minus, ArrowLeft, Search, List, PauseCircle, MessageSquareWarning, Send, X } from "lucide-react";
+import { Trash2, Plus, Minus, ArrowLeft, Search, List, PauseCircle, MessageSquareWarning, Send, X, Check } from "lucide-react";
 import { toast } from "@/lib/toast";
 import { playSound } from "@/lib/sounds";
 import { formatItemName, UNIDADE_PADRAO } from "@/lib/utils";
-import { opcoesDeUnidade, rotuloUnidade, unidadesDoItem } from "@/lib/unidades";
+import { formatarQtd, opcoesDeUnidade, rotuloUnidade, unidadesDoItem } from "@/lib/unidades";
 import { adicionarAoPedido, buscarItens, jaNoPedido, type LinhaPedido } from "@/lib/pedido";
-import {
-  ABA,
-  ABA_ATIVA,
-  ABA_INATIVA,
-  BOTAO_ICONE,
-  BOTAO_ICONE_LIGADO,
-  BOTAO_PRIMARIO,
-  CAMPO,
-  SELETOR,
-  TITULO,
-} from "@/lib/estilos";
+import { AdicionarAoPedido, nomeDaUnidade } from "@/components/AdicionarAoPedido";
+import { BOTAO_ICONE, BOTAO_ICONE_LIGADO, CAMPO, SELETOR, TITULO } from "@/lib/estilos";
 import { useBloqueio } from "@/contexts/BloqueioContext";
 
 type Rascunho = {
@@ -37,35 +28,30 @@ const ROTULO_DO_CAMPO = "text-[10px] font-bold text-slate-700 uppercase tracking
  *  celular não, senão o teclado abria sozinho a cada item. */
 const temMouse = () => typeof window !== "undefined" && window.matchMedia?.("(pointer: fine)").matches;
 
-/** − quantidade +, na altura dos outros campos (44px). */
+/** − quantidade +, com alvos de 48px (dedo, não ponteiro). */
 function Contador({
   valor,
   aoMudar,
   rotulo,
-  inputRef,
-  aoConfirmar,
 }: {
   valor: number | "";
   aoMudar: (v: number | "") => void;
   rotulo: string;
-  inputRef?: React.Ref<HTMLInputElement>;
-  aoConfirmar?: () => void;
 }) {
   const atual = typeof valor === "number" ? valor : 0;
   const mudar = (v: number) => aoMudar(Math.max(0, Math.round(v * 1000) / 1000));
   return (
-    <div className="flex items-center h-11 shrink-0 rounded-lg border border-slate-200 bg-white shadow-sm overflow-hidden">
+    <div className="flex items-center h-12 shrink-0 rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
       <button
         type="button"
         onClick={() => mudar(atual - 1)}
         disabled={atual <= 0}
         aria-label="Diminuir quantidade"
-        className="h-full w-10 flex items-center justify-center text-slate-600 hover:bg-slate-100 disabled:opacity-40 disabled:hover:bg-transparent touch-manipulation"
+        className="h-full w-12 flex items-center justify-center text-slate-700 hover:bg-slate-100 disabled:opacity-40 disabled:hover:bg-transparent touch-manipulation"
       >
-        <Minus className="h-4 w-4" />
+        <Minus className="h-5 w-5" />
       </button>
       <input
-        ref={inputRef}
         type="number"
         inputMode="decimal"
         enterKeyHint="done"
@@ -74,22 +60,16 @@ function Contador({
         value={valor}
         onChange={(e) => aoMudar(e.target.value === "" ? "" : Number(e.target.value))}
         onFocus={(e) => e.target.select()}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" && aoConfirmar) {
-            e.preventDefault();
-            aoConfirmar();
-          }
-        }}
         aria-label={rotulo}
-        className="h-full w-14 text-center text-base font-bold text-slate-800 border-x border-slate-200 focus:outline-none focus:bg-teal-50 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+        className="h-full w-14 text-center text-lg font-black text-slate-900 border-x border-slate-200 focus:outline-none focus:bg-teal-50 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
       />
       <button
         type="button"
         onClick={() => mudar(atual + 1)}
         aria-label="Aumentar quantidade"
-        className="h-full w-10 flex items-center justify-center text-slate-600 hover:bg-slate-100 touch-manipulation"
+        className="h-full w-12 flex items-center justify-center text-slate-700 hover:bg-slate-100 touch-manipulation"
       >
-        <Plus className="h-4 w-4" />
+        <Plus className="h-5 w-5" />
       </button>
     </div>
   );
@@ -119,18 +99,14 @@ export default function NovaRequisicao() {
   // aberto para escolher quantidade e unidade.
   const [busca, setBusca] = useState("");
   const [navegando, setNavegando] = useState(false);
+  // Material tocado: abre a folha de unidade e quantidade (AdicionarAoPedido).
   const [aberto, setAberto] = useState<string | null>(null);
-  const [qtdAberta, setQtdAberta] = useState<number | "">(1);
-  // Começa vazia de propósito quando há mais de uma: a pessoa escolhe a
-  // unidade. Com UN já marcado, "5 de carne" virava 5 UN quando era 5 KG.
-  const [unidadeAberta, setUnidadeAberta] = useState("");
   const [destaque, setDestaque] = useState<number | null>(null);
   const [alturaPainel, setAlturaPainel] = useState(360);
 
   const ancoraRef = useRef<HTMLDivElement>(null);
   const buscaRef = useRef<HTMLInputElement>(null);
   const painelRef = useRef<HTMLDivElement>(null);
-  const qtdRef = useRef<HTMLInputElement>(null);
   const linhasRef = useRef<(HTMLDivElement | null)[]>([]);
 
   // Rascunho por usuário: em um tablet compartilhado, a chave única fazia o
@@ -307,53 +283,47 @@ export default function NovaRequisicao() {
     setAberto(null);
   };
 
-  /** Abre o material na própria lista para escolher quantidade e unidade. */
+  /** Tocou no material: abre a folha de unidade e quantidade, com o teclado fechado. */
   const abrirItem = (item: Item) => {
-    if (aberto === item.id) {
-      setAberto(null);
-      return;
-    }
-    const unidades = unidadesDoItem(item);
+    buscaRef.current?.blur();
     setAberto(item.id);
-    setQtdAberta(1);
-    setUnidadeAberta(unidades.length === 1 ? unidades[0] : "");
-    if (temMouse()) {
-      setTimeout(() => qtdRef.current?.focus(), 0);
-    } else {
-      // Fecha o teclado: a escolha de quantidade e unidade fica toda à vista.
-      buscaRef.current?.blur();
-    }
   };
 
-  const adicionarAberto = () => {
+  const adicionarAberto = (quantidade: number, unidade: string) => {
     const item = estoqueItens.find((i) => i.id === aberto);
     if (!item) return;
-    const quantidade = Number(qtdAberta);
-    if (!quantidade || quantidade <= 0) {
-      toast.error("Informe a quantidade.");
-      return;
-    }
-    if (!unidadeAberta) {
-      toast.error("Escolha a unidade.");
-      return;
-    }
-    const { linhas, posicao } = adicionarAoPedido(selecionados, {
-      item_id: item.id,
-      quantidade,
-      unidade: unidadeAberta,
-      item,
-    });
+    const { linhas, posicao } = adicionarAoPedido(selecionados, { item_id: item.id, quantidade, unidade, item });
     setSelecionados(linhas);
     setAberto(null);
     setBusca("");
+    // Confirma o que entrou, com as palavras da pessoa ("2 caixas", não "2 CX").
+    toast.success(`${formatarQtd(quantidade)} ${nomeDaUnidade(unidade, quantidade)} de ${formatItemName(item.nome)} no pedido`, { duration: 2500 });
     // Na lista inteira, ela continua aberta para escolher o próximo; na busca,
     // fecha e o item aparece destacado no pedido.
     if (!navegando) setDestaque(posicao);
     if (temMouse()) buscaRef.current?.focus();
   };
 
+  /**
+   * Remove na hora e oferece "Desfazer": tirar um item por engano tem volta,
+   * sem a pessoa ter de confirmar cada remoção.
+   */
   const handleRemoverItem = (index: number) => {
+    const linha = selecionados[index];
+    if (!linha) return;
     setSelecionados((atuais) => atuais.filter((_, i) => i !== index));
+    toast(`${formatItemName(linha.item?.nome)} saiu do pedido`, {
+      duration: 6000,
+      action: {
+        label: "Desfazer",
+        onClick: () =>
+          setSelecionados((atuais) => {
+            const novos = [...atuais];
+            novos.splice(Math.min(index, novos.length), 0, linha);
+            return novos;
+          }),
+      },
+    });
   };
 
   /** Ajusta a quantidade de uma linha já adicionada, sem precisar remover e refazer. */
@@ -482,7 +452,12 @@ export default function NovaRequisicao() {
         >
           <ArrowLeft className="h-5 w-5" />
         </Button>
-        <h1 className={`${TITULO} min-w-0`}>{isEditMode ? "Editar requisição" : "Nova requisição"}</h1>
+        {/* Para quem pede, "pedido" (a palavra do dia a dia); "requisição" é a do almoxarifado. */}
+        <h1 className={`${TITULO} min-w-0`}>
+          {ehSolicitante
+            ? isEditMode ? "Editar pedido" : "Novo pedido"
+            : isEditMode ? "Editar requisição" : "Nova requisição"}
+        </h1>
       </div>
 
       {/* Edição feita pelo almoxarifado: diz de quem é o pedido, sem deixar trocar. */}
@@ -608,72 +583,34 @@ export default function NovaRequisicao() {
               </p>
             )}
 
+            {/* Cada resultado é UM alvo grande: tocar em qualquer ponto abre a
+                escolha de unidade e quantidade. O "+" redondo diz que é ali que
+                se adiciona; o que já está no pedido aparece marcado. */}
             {resultados.map((item) => {
               const unidades = unidadesDoItem(item);
               const ja = jaNoPedido(selecionados, item.id);
-              const estaAberto = aberto === item.id;
               return (
-                <div key={item.id} className={estaAberto ? "bg-teal-50/60" : ""}>
-                  <button
-                    type="button"
-                    onClick={() => abrirItem(item)}
-                    aria-expanded={estaAberto}
-                    className="w-full min-h-12 flex items-center gap-3 px-3 py-2 text-left hover:bg-slate-50"
-                  >
-                    <span className="min-w-0 flex-1">
-                      <span className="block text-sm font-bold text-slate-800 [overflow-wrap:anywhere]">{item.nome}</span>
-                      <span className="block text-[11px] font-semibold text-slate-500">{unidades.join(" · ")}</span>
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => abrirItem(item)}
+                  className="w-full min-h-14 flex items-center gap-3 px-3 py-2.5 text-left hover:bg-slate-50 active:bg-teal-50"
+                >
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-[15px] font-bold leading-snug text-slate-900 [overflow-wrap:anywhere]">{item.nome}</span>
+                    <span className="block text-xs font-medium text-slate-500">
+                      {unidades.map((u) => rotuloUnidade(u)).join(" · ")}
                     </span>
-                    {ja && (
-                      <span className="shrink-0 rounded-full border border-teal-200 bg-teal-50 px-2 py-0.5 text-[11px] font-bold text-teal-700 whitespace-nowrap">
-                        {ja}
-                      </span>
-                    )}
-                    {!estaAberto && <Plus className="h-4 w-4 shrink-0 text-slate-400" />}
-                  </button>
-
-                  {estaAberto && (
-                    <div className="px-3 pb-3 space-y-2">
-                      {unidades.length > 1 && (
-                        <div role="radiogroup" aria-label="Unidade" className="flex flex-wrap gap-1 p-1 bg-slate-100 rounded-lg border border-slate-200">
-                          {unidades.map((u) => (
-                            <button
-                              key={u}
-                              type="button"
-                              role="radio"
-                              aria-checked={unidadeAberta === u}
-                              onClick={() => setUnidadeAberta(u)}
-                              title={u}
-                              className={`${ABA} h-9 ${unidadeAberta === u ? ABA_ATIVA : ABA_INATIVA}`}
-                            >
-                              {rotuloUnidade(u)}
-                            </button>
-                          ))}
-                        </div>
-                      )}
-                      <div className="flex gap-2">
-                        <Contador
-                          valor={qtdAberta}
-                          aoMudar={setQtdAberta}
-                          rotulo={`Quantidade de ${item.nome}`}
-                          inputRef={qtdRef}
-                          aoConfirmar={adicionarAberto}
-                        />
-                        <Button
-                          onClick={adicionarAberto}
-                          disabled={!qtdAberta || !unidadeAberta}
-                          className={`${BOTAO_PRIMARIO} flex-1 min-w-0`}
-                        >
-                          <Plus className="h-4 w-4" />
-                          {unidadeAberta ? `Adicionar ${unidadeAberta}` : "Adicionar"}
-                        </Button>
-                      </div>
-                      {!unidadeAberta && (
-                        <p className="text-xs font-semibold text-amber-800">Escolha a unidade.</p>
-                      )}
-                    </div>
+                  </span>
+                  {ja && (
+                    <span className="shrink-0 inline-flex items-center gap-1 rounded-full bg-teal-600 px-2 py-0.5 text-[11px] font-bold text-white whitespace-nowrap">
+                      <Check className="h-3 w-3" strokeWidth={3} /> {ja}
+                    </span>
                   )}
-                </div>
+                  <span className="h-10 w-10 shrink-0 rounded-full border-2 border-teal-200 bg-teal-50 text-teal-700 flex items-center justify-center" aria-hidden>
+                    <Plus className="h-5 w-5" strokeWidth={2.5} />
+                  </span>
+                </button>
               );
             })}
           </div>
@@ -685,9 +622,18 @@ export default function NovaRequisicao() {
       {painelAberto ? (
         <div className="h-[70vh]" aria-hidden />
       ) : total === 0 ? (
-        <div className="text-center py-10 px-4 bg-slate-50 rounded-xl border border-dashed border-slate-200/80 shadow-md shadow-slate-200/50">
-          <p className="text-slate-700 font-medium">Nenhum item no pedido.</p>
-        </div>
+        // Pedido vazio: mostra o caminho inteiro em três passos, para quem não
+        // sabe por onde começar. Some assim que entra o primeiro item.
+        <ol className="grid grid-cols-3 gap-2 rounded-2xl border border-dashed border-slate-200 bg-white p-4">
+          {["Busque o material", "Escolha unidade e quantidade", "Envie o pedido"].map((t, i) => (
+            <li key={t} className="flex flex-col items-center text-center gap-1.5">
+              <span className="h-8 w-8 rounded-full bg-teal-50 border-2 border-teal-200 text-teal-700 text-sm font-black flex items-center justify-center">
+                {i + 1}
+              </span>
+              <span className="text-xs font-semibold leading-tight text-slate-600">{t}</span>
+            </li>
+          ))}
+        </ol>
       ) : (
         <section className="space-y-2">
           <h2 className="flex items-baseline gap-1.5 px-1 text-xs font-black uppercase tracking-wider text-slate-600">
@@ -697,20 +643,23 @@ export default function NovaRequisicao() {
             {selecionados.map((s, idx) => {
               const nome = formatItemName(s.item?.nome);
               return (
+                // Nome em cima; embaixo, quantidade e unidade à esquerda e o
+                // remover sozinho na outra ponta — longe do "+", para não ser
+                // tocado sem querer (e com "Desfazer" se for).
                 <div
                   key={`${s.item_id}-${s.unidade}-${idx}`}
                   ref={(el) => { linhasRef.current[idx] = el; }}
-                  className={`flex flex-wrap items-center gap-x-3 gap-y-2 px-3 py-2.5 transition-colors duration-700 ${
+                  className={`px-3 py-3 space-y-2 transition-colors duration-700 sm:flex sm:items-center sm:gap-3 sm:space-y-0 ${
                     destaque === idx ? "bg-teal-50" : ""
                   }`}
                 >
-                  <div className="min-w-0 flex-1 basis-48">
-                    <p className="text-sm font-bold text-slate-800 [overflow-wrap:anywhere]">{nome}</p>
+                  <div className="min-w-0 sm:flex-1">
+                    <p className="text-[15px] font-bold leading-snug text-slate-900 [overflow-wrap:anywhere]">{nome}</p>
                     {s.quantidade <= 0 && (
                       <p className="text-xs font-bold text-red-600">Quantidade zerada</p>
                     )}
                   </div>
-                  <div className="flex items-center gap-2 ml-auto">
+                  <div className="flex items-center gap-2">
                     <Contador
                       valor={s.quantidade}
                       aoMudar={(v) => alterarQuantidade(idx, v === "" ? 0 : v)}
@@ -720,7 +669,7 @@ export default function NovaRequisicao() {
                       value={s.unidade}
                       onChange={(e) => alterarUnidade(idx, e.target.value)}
                       aria-label={`Unidade de ${nome}`}
-                      className={`${SELETOR} w-[4.5rem] px-2`}
+                      className={`${SELETOR} h-12 w-[5.5rem] px-2 text-base sm:text-sm`}
                     >
                       {/* Cadastro atual, não a cópia guardada no rascunho: um
                           rascunho antigo não conhece as unidades novas do item. */}
@@ -728,16 +677,15 @@ export default function NovaRequisicao() {
                         <option key={u} value={u}>{u}</option>
                       ))}
                     </select>
-                    <Button
-                      variant="ghost"
-                      size="icon"
+                    <button
+                      type="button"
                       onClick={() => handleRemoverItem(idx)}
                       aria-label={`Remover ${nome}`}
                       title="Remover do pedido"
-                      className="h-11 w-11 shrink-0 text-slate-400 hover:text-red-600 hover:bg-red-50"
+                      className="ml-auto sm:ml-2 h-12 w-12 shrink-0 rounded-xl border border-slate-200 bg-white text-slate-500 flex items-center justify-center hover:text-red-600 hover:border-red-200 hover:bg-red-50 touch-manipulation"
                     >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
+                      <Trash2 className="h-5 w-5" />
+                    </button>
                   </div>
                 </div>
               );
@@ -749,19 +697,33 @@ export default function NovaRequisicao() {
       {/* Enviar: sempre à mão, preso no pé da tela. Some enquanto busca, para
           não ficar flutuando em cima do teclado. */}
       {total > 0 && !painelAberto && (
-        <div className="sticky bottom-3 z-20 flex items-center gap-3 rounded-xl border border-slate-200 bg-white p-1.5 pl-4 shadow-md">
+        <div className="sticky bottom-3 z-20 flex items-center gap-3 rounded-2xl border border-slate-200 bg-white p-2 pl-4 shadow-lg shadow-slate-300/50">
           <p className="flex-1 min-w-0 text-sm font-bold text-slate-700 whitespace-nowrap">
             {total} {total === 1 ? "item" : "itens"}
             <span className="font-medium text-slate-500 max-[359px]:hidden"> no pedido</span>
           </p>
-          <Button onClick={handleSubmit} disabled={loading} className={`${BOTAO_PRIMARIO} shadow-none`}>
-            <Send className="h-4 w-4" />
+          <Button
+            onClick={handleSubmit}
+            disabled={loading}
+            className="h-12 px-5 rounded-xl bg-teal-600 hover:bg-teal-700 text-white text-base font-black shadow-none"
+          >
+            <Send className="h-5 w-5" />
             {loading
               ? (isEditMode ? "Salvando..." : "Enviando...")
-              : (isEditMode ? "Salvar alterações" : "Enviar requisição")}
+              : isEditMode
+                ? "Salvar alterações"
+                : ehSolicitante ? "Enviar pedido" : "Enviar requisição"}
           </Button>
         </div>
       )}
+
+      {/* Unidade e quantidade do material tocado: uma folha, um passo de cada vez. */}
+      <AdicionarAoPedido
+        item={estoqueItens.find((i) => i.id === aberto) ?? null}
+        jaNoPedido={aberto ? jaNoPedido(selecionados, aberto) : undefined}
+        aoFechar={() => setAberto(null)}
+        aoAdicionar={adicionarAberto}
+      />
     </div>
   );
 }

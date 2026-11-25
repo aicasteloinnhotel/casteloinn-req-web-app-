@@ -30,6 +30,7 @@ import { ObservacaoDestaque } from "@/components/ObservacaoDestaque";
 import { playSound } from "@/lib/sounds";
 import { imprimirPdf } from "@/lib/imprimir";
 import { textoDaObservacao } from "@/lib/observacao";
+import { DetalheSolicitante } from "./DetalheSolicitante";
 import { Requisicao, Historico, Devolucao } from "@/types";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
@@ -969,6 +970,23 @@ export default function DetalheRequisicao() {
   const qtdDevolucao = lerQuantidade(devQtd);
   const devolucaoValida =
     !!linhaDevolucao && qtdDevolucao > 0 && qtdDevolucao <= maxDevolucao && devMotivo.trim().length >= 3;
+
+  // Quem pediu vê uma tela própria: o status em palavras simples, os itens e
+  // as ações grandes e separadas. O resto (TOTVS, devolução, impressão) é do
+  // almoxarifado.
+  if (!ehAlmoxarifado) {
+    return (
+      <DetalheSolicitante
+        req={req}
+        rel={rel}
+        historico={historico}
+        ehDono={ehDono}
+        updating={updating}
+        aoSalvarObservacao={ehDono && req.status === "PENDENTE" ? handleSalvarObservacao : undefined}
+        aoCancelar={() => handleStatusChange("CANCELADA")}
+      />
+    );
+  }
 
   return (
     <div className="space-y-6 max-w-3xl mx-auto pb-10 print:p-0 print:max-w-none">

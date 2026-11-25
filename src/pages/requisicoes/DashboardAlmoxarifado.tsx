@@ -28,6 +28,7 @@ import {
 } from "recharts";
 import { descreverQuantidades, foiEntregue, formatItemName, precisaLancar } from "@/lib/utils";
 import { imprimirPdf } from "@/lib/imprimir";
+import { primeiroNome, saudacao } from "@/lib/saudacao";
 import { textoDaObservacao } from "@/lib/observacao";
 import { BotaoSuspenderRequisicoes } from "@/components/PausaInventario";
 import { useBloqueio } from "@/contexts/BloqueioContext";
@@ -74,26 +75,6 @@ const tempoDesde = (iso: string, agora: number): string => {
   return `${d} ${d === 1 ? "dia" : "dias"}`;
 };
 
-/** "Bom dia" até 11h59, "Boa tarde" até 17h59, depois "Boa noite". */
-const saudacao = (quando: Date): string => {
-  const h = quando.getHours();
-  if (h >= 5 && h < 12) return "Bom dia";
-  if (h >= 12 && h < 18) return "Boa tarde";
-  return "Boa noite";
-};
-
-/**
- * Só o primeiro nome, com a primeira letra maiúscula ("MARIA JOSÉ" → "Maria").
- * Login que é cargo abreviado ("Enc. Almoxarifado") fica inteiro: "Enc."
- * sozinho não diz nada.
- */
-const primeiroNome = (nome?: string | null): string => {
-  const limpo = (nome || "").trim().replace(/\s+/g, " ");
-  const primeiro = limpo.split(" ")[0] || "";
-  if (!primeiro) return "";
-  if (primeiro.endsWith(".")) return limpo;
-  return primeiro.charAt(0).toUpperCase() + primeiro.slice(1).toLowerCase();
-};
 
 /** Pedido esperando mais que isto fica em destaque na fila. */
 const ESPERA_LONGA_MIN = 30;

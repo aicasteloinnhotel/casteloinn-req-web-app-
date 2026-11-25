@@ -1,21 +1,12 @@
 import React, { useState, Suspense, lazy } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { Link } from "react-router-dom";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
 import { format } from "date-fns";
-import {
-  Clock,
-  PackageCheck,
-  Send,
-  Ban,
-  PlusCircle,
-  FileText,
-  ChevronRight,
-  RefreshCcw,
-  HelpCircle,
-  PauseCircle,
-} from "lucide-react";
+import { FileText, ChevronRight, HelpCircle, PauseCircle, Plus } from "lucide-react";
+import { EtiquetaStatus } from "@/components/StatusSimples";
+import { situacaoParaSolicitante } from "@/lib/statusSolicitante";
+import { primeiroNome, saudacao } from "@/lib/saudacao";
+import { TITULO } from "@/lib/estilos";
 import { useBloqueio } from "@/contexts/BloqueioContext";
 import { useRequisicoesSync } from "@/hooks/useRequisicoesSync";
 import { Requisicao } from "@/types";
@@ -34,72 +25,98 @@ export default function Dashboard() {
 
   if (!user) return null;
 
-  // Tela Inicial Simplificada para Solicitantes (Mobile First)
+  // Tela inicial do solicitante. Uma ação principal, grande e no alto (o que se
+  // faz quase sempre); logo abaixo, a resposta para "e o meu pedido?" sem
+  // precisar abrir outra tela; o resto, discreto.
   if (user.perfil === "SOLICITANTE") {
+    const emAndamento = reqs
+      .filter((r) => situacaoParaSolicitante(r.status).emAndamento)
+      .sort((a, b) => b.created_at.localeCompare(a.created_at));
     return (
-      <div className="space-y-6 flex flex-col items-center max-w-sm mx-auto pt-4 sm:pt-10">
-        <div className="text-center mb-6">
-          <h1 className="text-2xl font-bold tracking-tight text-teal-900 border-b-2 border-teal-600 inline-block pb-1">
-            Escolha uma opção abaixo
-          </h1>
+      <div className="max-w-md mx-auto space-y-6 pt-1 sm:pt-6">
+        <div>
+          <p className="text-sm font-semibold text-slate-500">{saudacao(new Date())},</p>
+          <h1 className={TITULO}>{primeiroNome(user.nome) || "Bem-vindo"}</h1>
         </div>
 
-        {/* Pausa para inventário: o cartão continua no lugar, mas travado e
-            dizendo por quê — sumir com ele confundiria quem usa todo dia. */}
+        {/* Pausa para inventário: o lugar do botão continua, mas diz por quê
+            não dá — sumir com ele confundiria quem usa todo dia. */}
         {bloqueio.ativo ? (
-          <Card className="w-full border-none shadow-xl shadow-slate-200/60 overflow-hidden bg-white opacity-70 cursor-not-allowed">
-            <CardContent className="p-6 flex items-center gap-4">
-              <div className="bg-amber-50 p-3 rounded-full text-amber-600">
-                <PauseCircle className="h-8 w-8" />
-              </div>
-              <div className="text-left">
-                <h2 className="text-lg font-bold text-slate-800">Nova Requisição</h2>
-                <p className="text-sm font-semibold text-amber-800">Suspensa temporariamente</p>
-              </div>
-            </CardContent>
-          </Card>
+          <div className="flex items-center gap-4 rounded-2xl border-2 border-amber-200 bg-amber-50 p-5">
+            <span className="h-14 w-14 shrink-0 rounded-2xl bg-amber-100 text-amber-700 flex items-center justify-center">
+              <PauseCircle className="h-8 w-8" />
+            </span>
+            <span className="min-w-0">
+              <span className="block text-lg font-black text-amber-950">Pedidos pausados</span>
+              <span className="block text-sm font-medium text-amber-900">
+                {bloqueio.motivo || "Inventário em andamento"}. Volta assim que o almoxarifado liberar.
+              </span>
+            </span>
+          </div>
         ) : (
-        <Link to="/requisicoes/nova" className="w-full">
-          <Card className="hover:ring-2 hover:ring-teal-600 transition-all border-none shadow-xl shadow-slate-200/60 border-slate-200/60 overflow-hidden bg-white group cursor-pointer">
-            <CardContent className="p-6 flex items-center justify-between">
-              <div className="flex items-center gap-4">
-                <div className="bg-teal-50 p-3 rounded-full text-teal-700 group-hover:bg-teal-600 group-hover:text-white transition-colors">
-                  <PlusCircle className="h-8 w-8" />
-                </div>
-                <div className="text-left">
-                  <h2 className="text-lg font-bold text-slate-800">
-                    Nova Requisição
-                  </h2>
-                </div>
-              </div>
-              <ChevronRight className="text-slate-300 group-hover:text-teal-600" />
-            </CardContent>
-          </Card>
-        </Link>
+          <Link
+            to="/requisicoes/nova"
+            className="group flex items-center gap-4 rounded-2xl bg-teal-600 p-5 text-white shadow-lg shadow-teal-900/15 hover:bg-teal-700 active:scale-[0.99] transition"
+          >
+            <span className="h-14 w-14 shrink-0 rounded-2xl bg-white/15 flex items-center justify-center">
+              <Plus className="h-8 w-8" strokeWidth={2.5} />
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block text-xl font-black leading-tight">Fazer um pedido</span>
+              <span className="block text-sm font-medium text-teal-50">Pedir materiais ao almoxarifado</span>
+            </span>
+            <ChevronRight className="h-6 w-6 shrink-0 text-teal-100 group-hover:translate-x-0.5 transition" />
+          </Link>
         )}
-        <Link to="/requisicoes" className="w-full">
-          <Card className="hover:ring-2 hover:ring-teal-600 transition-all border-none shadow-xl shadow-slate-200/60 border-slate-200/60 overflow-hidden bg-white group cursor-pointer">
-            <CardContent className="p-6 flex items-center justify-between">
-              <div className="flex items-center gap-4">
-                <div className="bg-slate-100 p-3 rounded-full text-slate-600 group-hover:bg-slate-200 transition-colors">
-                  <FileText className="h-8 w-8" />
-                </div>
-                <div className="text-left">
-                  <h2 className="text-lg font-bold text-slate-800">
-                    Minhas Requisições
-                  </h2>
-                </div>
-              </div>
-              <ChevronRight className="text-slate-300 group-hover:text-teal-600" />
-            </CardContent>
-          </Card>
-        </Link>
 
-        {/* Discreto de propósito: os dois cartões acima são o que se usa todo
-            dia. O menu do avatar leva ao mesmo lugar. */}
+        {/* "E o meu pedido?" respondido aqui mesmo. */}
+        <section className="space-y-2">
+          <h2 className="flex items-baseline gap-1.5 px-1 text-xs font-black uppercase tracking-wider text-slate-600">
+            Em andamento
+            {emAndamento.length > 0 && <span className="font-semibold text-slate-400">· {emAndamento.length}</span>}
+          </h2>
+          {loading ? (
+            <div className="h-20 rounded-2xl bg-slate-100 animate-pulse" />
+          ) : emAndamento.length === 0 ? (
+            <div className="rounded-2xl border border-dashed border-slate-200 bg-white px-4 py-6 text-center text-sm font-medium text-slate-500">
+              Nenhum pedido em andamento.
+            </div>
+          ) : (
+            <div className="rounded-2xl border border-slate-200 bg-white shadow-lg shadow-slate-200/50 divide-y divide-slate-100 overflow-hidden">
+              {emAndamento.slice(0, 5).map((r) => {
+                const qtd = r.itens?.length ?? 0;
+                return (
+                  <Link
+                    key={r.id}
+                    to={`/requisicoes/${r.id}`}
+                    className="flex items-center gap-3 px-4 py-3.5 min-h-16 hover:bg-slate-50 active:bg-slate-100"
+                  >
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-base font-bold text-slate-900">Pedido #{r.codigo_requisicao ?? "—"}</span>
+                      <span className="block text-xs font-medium text-slate-500 tabular-nums">
+                        {qtd > 0 && `${qtd} ${qtd === 1 ? "item" : "itens"} · `}
+                        {format(new Date(r.created_at), "dd/MM HH:mm")}
+                      </span>
+                    </span>
+                    <EtiquetaStatus status={r.status} />
+                    <ChevronRight className="h-5 w-5 shrink-0 text-slate-300" />
+                  </Link>
+                );
+              })}
+            </div>
+          )}
+          <Link
+            to="/requisicoes"
+            className="flex items-center justify-center gap-2 h-12 rounded-xl border border-slate-200 bg-white text-sm font-bold text-slate-700 hover:bg-slate-50"
+          >
+            <FileText className="h-4 w-4" /> Ver todos os meus pedidos
+          </Link>
+        </section>
+
+        {/* Discreto de propósito: o menu do avatar leva ao mesmo lugar. */}
         <Link
           to="/ajuda"
-          className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold text-teal-800 hover:bg-teal-50"
+          className="mx-auto flex w-fit items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold text-teal-800 hover:bg-teal-50"
         >
           <HelpCircle className="h-4 w-4" /> Ajuda e contato do almoxarifado
         </Link>
