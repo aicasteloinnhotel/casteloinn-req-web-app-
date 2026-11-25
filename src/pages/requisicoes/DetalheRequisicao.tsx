@@ -30,7 +30,6 @@ import { ObservacaoDestaque } from "@/components/ObservacaoDestaque";
 import { playSound } from "@/lib/sounds";
 import { imprimirPdf } from "@/lib/imprimir";
 import { textoDaObservacao } from "@/lib/observacao";
-import { DetalheSolicitante } from "./DetalheSolicitante";
 import { Requisicao, Historico, Devolucao } from "@/types";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
@@ -971,23 +970,6 @@ export default function DetalheRequisicao() {
   const devolucaoValida =
     !!linhaDevolucao && qtdDevolucao > 0 && qtdDevolucao <= maxDevolucao && devMotivo.trim().length >= 3;
 
-  // Quem pediu vê uma tela própria: o status em palavras simples, os itens e
-  // as ações grandes e separadas. O resto (TOTVS, devolução, impressão) é do
-  // almoxarifado.
-  if (!ehAlmoxarifado) {
-    return (
-      <DetalheSolicitante
-        req={req}
-        rel={rel}
-        historico={historico}
-        ehDono={ehDono}
-        updating={updating}
-        aoSalvarObservacao={ehDono && req.status === "PENDENTE" ? handleSalvarObservacao : undefined}
-        aoCancelar={() => handleStatusChange("CANCELADA")}
-      />
-    );
-  }
-
   return (
     <div className="space-y-6 max-w-3xl mx-auto pb-10 print:p-0 print:max-w-none">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 print:hidden border-b pb-4">
@@ -1016,7 +998,9 @@ export default function DetalheRequisicao() {
             separar, a correção é na própria separação. Cancelar continua só do
             dono. O "|| perfil === SOLICITANTE" que havia aqui anulava a checagem
             de dono e deixava um solicitante editar o pedido de outro pela URL. */}
-        {req.status === "PENDENTE" && (ehDono || ehAlmoxarifado) && (
+        {/* No topo, o editar só para o almoxarifado. Quem pediu tem as ações
+            embaixo, grandes e separadas (ver "Ações" no fim da coluna). */}
+        {req.status === "PENDENTE" && ehAlmoxarifado && (
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full sm:w-auto">
             <Button
               onClick={() => navigate(`/requisicoes/${req.id}/editar`)}
@@ -1024,16 +1008,6 @@ export default function DetalheRequisicao() {
             >
               <Edit2 className="h-4 w-4" /> Editar Requisição
             </Button>
-            {podeCancelarComoDono && (
-              <Button
-                variant="outline"
-                onClick={() => setConfirmarCancelamento(true)}
-                disabled={updating}
-                className="w-full sm:w-auto h-9 px-4 rounded-lg text-sm font-medium border-red-200 text-red-600 hover:bg-red-50 hover:text-red-700"
-              >
-                <Ban className="h-4 w-4 mr-2" /> Cancelar
-              </Button>
-            )}
           </div>
         )}
 
@@ -1359,6 +1333,30 @@ export default function DetalheRequisicao() {
           </div>
 
           {/* A observação subiu para o topo da página (ObservacaoDestaque). */}
+
+          {/* Ações de quem pediu, enquanto ninguém começou: os mesmos botões
+              das "Ações de Atendimento" do almoxarifado — o principal grande,
+              e o cancelar largo, vermelho e afastado (antes eram dois botões
+              pequenos colados no topo). */}
+          {podeCancelarComoDono && (
+            <div className="space-y-3 pt-6 print:hidden">
+              <h3 className="font-bold text-slate-800 text-sm uppercase tracking-wider mb-2">Ações</h3>
+              <Button
+                onClick={() => navigate(`/requisicoes/${req.id}/editar`)}
+                className="w-full h-14 bg-teal-600 hover:bg-teal-700 text-white font-bold text-lg rounded-xl shadow-lg shadow-slate-200/50 transition-all"
+              >
+                <Edit2 className="mr-2 h-5 w-5" /> Editar Requisição
+              </Button>
+              <Button
+                onClick={() => setConfirmarCancelamento(true)}
+                variant="outline"
+                className="w-full h-12 border-red-200 text-red-600 hover:bg-red-50 hover:text-red-700 rounded-xl font-semibold mt-6"
+                disabled={updating}
+              >
+                <Ban className="mr-2 h-5 w-5" /> Cancelar Pedido
+              </Button>
+            </div>
+          )}
 
           {/* Botões de Ação para Almoxarife/Gerente */}
           {podeAlterarStatus && (

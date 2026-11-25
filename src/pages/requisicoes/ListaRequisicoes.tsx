@@ -233,7 +233,7 @@ export default function ListaRequisicoes() {
       {/* Cabeçalho: título e as duas ações da tela (Nova, atualizar). */}
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <h1 className={TITULO}>{ehAlmoxarifado ? "Requisições" : "Meus pedidos"}</h1>
+          <h1 className={TITULO}>Requisições</h1>
         </div>
         <div className="flex items-center gap-2 shrink-0">
           <Button

@@ -4,14 +4,14 @@ import { useAuth } from "@/contexts/AuthContext";
 import { getItens, createRequisicao, getUsuarios, getRequisicao, updateRequisicaoCompleta } from "@/services/api";
 import { Item } from "@/types";
 import { Button } from "@/components/ui/button";
-import { Trash2, Plus, Minus, ArrowLeft, Search, List, PauseCircle, MessageSquareWarning, Send, X, Check } from "lucide-react";
+import { Trash2, Plus, ArrowLeft, Search, List, PauseCircle, MessageSquareWarning, Send, X, ChevronRight } from "lucide-react";
 import { toast } from "@/lib/toast";
 import { playSound } from "@/lib/sounds";
 import { formatItemName, UNIDADE_PADRAO } from "@/lib/utils";
 import { formatarQtd, opcoesDeUnidade, rotuloUnidade, unidadesDoItem } from "@/lib/unidades";
 import { adicionarAoPedido, buscarItens, jaNoPedido, type LinhaPedido } from "@/lib/pedido";
-import { AdicionarAoPedido, nomeDaUnidade } from "@/components/AdicionarAoPedido";
-import { BOTAO_ICONE, BOTAO_ICONE_LIGADO, CAMPO, SELETOR, TITULO } from "@/lib/estilos";
+import { AdicionarAoPedido, Contador, nomeDaUnidade } from "@/components/AdicionarAoPedido";
+import { BOTAO_ICONE, BOTAO_ICONE_LIGADO, BOTAO_PRIMARIO, CAMPO, SELETOR, TITULO } from "@/lib/estilos";
 import { useBloqueio } from "@/contexts/BloqueioContext";
 
 type Rascunho = {
@@ -28,52 +28,6 @@ const ROTULO_DO_CAMPO = "text-[10px] font-bold text-slate-700 uppercase tracking
  *  celular não, senão o teclado abria sozinho a cada item. */
 const temMouse = () => typeof window !== "undefined" && window.matchMedia?.("(pointer: fine)").matches;
 
-/** − quantidade +, com alvos de 48px (dedo, não ponteiro). */
-function Contador({
-  valor,
-  aoMudar,
-  rotulo,
-}: {
-  valor: number | "";
-  aoMudar: (v: number | "") => void;
-  rotulo: string;
-}) {
-  const atual = typeof valor === "number" ? valor : 0;
-  const mudar = (v: number) => aoMudar(Math.max(0, Math.round(v * 1000) / 1000));
-  return (
-    <div className="flex items-center h-12 shrink-0 rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
-      <button
-        type="button"
-        onClick={() => mudar(atual - 1)}
-        disabled={atual <= 0}
-        aria-label="Diminuir quantidade"
-        className="h-full w-12 flex items-center justify-center text-slate-700 hover:bg-slate-100 disabled:opacity-40 disabled:hover:bg-transparent touch-manipulation"
-      >
-        <Minus className="h-5 w-5" />
-      </button>
-      <input
-        type="number"
-        inputMode="decimal"
-        enterKeyHint="done"
-        step="any"
-        min={0}
-        value={valor}
-        onChange={(e) => aoMudar(e.target.value === "" ? "" : Number(e.target.value))}
-        onFocus={(e) => e.target.select()}
-        aria-label={rotulo}
-        className="h-full w-14 text-center text-lg font-black text-slate-900 border-x border-slate-200 focus:outline-none focus:bg-teal-50 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
-      />
-      <button
-        type="button"
-        onClick={() => mudar(atual + 1)}
-        aria-label="Aumentar quantidade"
-        className="h-full w-12 flex items-center justify-center text-slate-700 hover:bg-slate-100 touch-manipulation"
-      >
-        <Plus className="h-5 w-5" />
-      </button>
-    </div>
-  );
-}
 
 export default function NovaRequisicao() {
   const { id } = useParams<{ id: string }>();
@@ -452,11 +406,8 @@ export default function NovaRequisicao() {
         >
           <ArrowLeft className="h-5 w-5" />
         </Button>
-        {/* Para quem pede, "pedido" (a palavra do dia a dia); "requisição" é a do almoxarifado. */}
         <h1 className={`${TITULO} min-w-0`}>
-          {ehSolicitante
-            ? isEditMode ? "Editar pedido" : "Novo pedido"
-            : isEditMode ? "Editar requisição" : "Nova requisição"}
+          {isEditMode ? "Editar requisição" : "Nova requisição"}
         </h1>
       </div>
 
@@ -583,9 +534,8 @@ export default function NovaRequisicao() {
               </p>
             )}
 
-            {/* Cada resultado é UM alvo grande: tocar em qualquer ponto abre a
-                escolha de unidade e quantidade. O "+" redondo diz que é ali que
-                se adiciona; o que já está no pedido aparece marcado. */}
+            {/* Tocar em qualquer ponto da linha abre a escolha de unidade e
+                quantidade (a seta das listas do app diz que abre algo). */}
             {resultados.map((item) => {
               const unidades = unidadesDoItem(item);
               const ja = jaNoPedido(selecionados, item.id);
@@ -594,22 +544,18 @@ export default function NovaRequisicao() {
                   key={item.id}
                   type="button"
                   onClick={() => abrirItem(item)}
-                  className="w-full min-h-14 flex items-center gap-3 px-3 py-2.5 text-left hover:bg-slate-50 active:bg-teal-50"
+                  className="w-full min-h-12 flex items-center gap-3 px-3 py-2 text-left hover:bg-slate-50 active:bg-teal-50"
                 >
                   <span className="min-w-0 flex-1">
-                    <span className="block text-[15px] font-bold leading-snug text-slate-900 [overflow-wrap:anywhere]">{item.nome}</span>
-                    <span className="block text-xs font-medium text-slate-500">
-                      {unidades.map((u) => rotuloUnidade(u)).join(" · ")}
-                    </span>
+                    <span className="block text-sm font-bold text-slate-800 [overflow-wrap:anywhere]">{item.nome}</span>
+                    <span className="block text-[11px] font-semibold text-slate-500">{unidades.join(" · ")}</span>
                   </span>
                   {ja && (
-                    <span className="shrink-0 inline-flex items-center gap-1 rounded-full bg-teal-600 px-2 py-0.5 text-[11px] font-bold text-white whitespace-nowrap">
-                      <Check className="h-3 w-3" strokeWidth={3} /> {ja}
+                    <span className="shrink-0 rounded-full border border-teal-200 bg-teal-50 px-2 py-0.5 text-[11px] font-bold text-teal-700 whitespace-nowrap">
+                      {ja}
                     </span>
                   )}
-                  <span className="h-10 w-10 shrink-0 rounded-full border-2 border-teal-200 bg-teal-50 text-teal-700 flex items-center justify-center" aria-hidden>
-                    <Plus className="h-5 w-5" strokeWidth={2.5} />
-                  </span>
+                  <ChevronRight className="h-4 w-4 shrink-0 text-slate-400" aria-hidden />
                 </button>
               );
             })}
@@ -622,18 +568,9 @@ export default function NovaRequisicao() {
       {painelAberto ? (
         <div className="h-[70vh]" aria-hidden />
       ) : total === 0 ? (
-        // Pedido vazio: mostra o caminho inteiro em três passos, para quem não
-        // sabe por onde começar. Some assim que entra o primeiro item.
-        <ol className="grid grid-cols-3 gap-2 rounded-2xl border border-dashed border-slate-200 bg-white p-4">
-          {["Busque o material", "Escolha unidade e quantidade", "Envie o pedido"].map((t, i) => (
-            <li key={t} className="flex flex-col items-center text-center gap-1.5">
-              <span className="h-8 w-8 rounded-full bg-teal-50 border-2 border-teal-200 text-teal-700 text-sm font-black flex items-center justify-center">
-                {i + 1}
-              </span>
-              <span className="text-xs font-semibold leading-tight text-slate-600">{t}</span>
-            </li>
-          ))}
-        </ol>
+        <div className="text-center py-10 px-4 bg-slate-50 rounded-xl border border-dashed border-slate-200/80 shadow-md shadow-slate-200/50">
+          <p className="text-slate-700 font-medium">Nenhum item no pedido.</p>
+        </div>
       ) : (
         <section className="space-y-2">
           <h2 className="flex items-baseline gap-1.5 px-1 text-xs font-black uppercase tracking-wider text-slate-600">
@@ -643,23 +580,35 @@ export default function NovaRequisicao() {
             {selecionados.map((s, idx) => {
               const nome = formatItemName(s.item?.nome);
               return (
-                // Nome em cima; embaixo, quantidade e unidade à esquerda e o
-                // remover sozinho na outra ponta — longe do "+", para não ser
-                // tocado sem querer (e com "Desfazer" se for).
                 <div
                   key={`${s.item_id}-${s.unidade}-${idx}`}
                   ref={(el) => { linhasRef.current[idx] = el; }}
-                  className={`px-3 py-3 space-y-2 transition-colors duration-700 sm:flex sm:items-center sm:gap-3 sm:space-y-0 ${
+                  className={`flex flex-wrap items-center gap-x-3 gap-y-2 px-3 py-2.5 transition-colors duration-700 ${
                     destaque === idx ? "bg-teal-50" : ""
                   }`}
                 >
-                  <div className="min-w-0 sm:flex-1">
-                    <p className="text-[15px] font-bold leading-snug text-slate-900 [overflow-wrap:anywhere]">{nome}</p>
-                    {s.quantidade <= 0 && (
-                      <p className="text-xs font-bold text-red-600">Quantidade zerada</p>
-                    )}
+                  {/* Nome com o remover na mesma linha, longe do − e +: a
+                      lixeira não fica ao alcance de quem mexe na quantidade. */}
+                  <div className="min-w-0 flex-1 basis-48 flex items-start gap-2">
+                    <div className="min-w-0 flex-1 pt-1">
+                      <p className="text-sm font-bold text-slate-800 [overflow-wrap:anywhere]">{nome}</p>
+                      {s.quantidade <= 0 && (
+                        <p className="text-xs font-bold text-red-600">Quantidade zerada</p>
+                      )}
+                    </div>
+                    {/* Lixeira vermelha, como em Itens e Usuários. */}
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => handleRemoverItem(idx)}
+                      aria-label={`Remover ${nome}`}
+                      title="Remover do pedido"
+                      className="h-9 w-9 -mr-1 -mt-0.5 shrink-0 text-red-500 hover:text-red-700 hover:bg-red-50"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 ml-auto">
                     <Contador
                       valor={s.quantidade}
                       aoMudar={(v) => alterarQuantidade(idx, v === "" ? 0 : v)}
@@ -669,7 +618,7 @@ export default function NovaRequisicao() {
                       value={s.unidade}
                       onChange={(e) => alterarUnidade(idx, e.target.value)}
                       aria-label={`Unidade de ${nome}`}
-                      className={`${SELETOR} h-12 w-[5.5rem] px-2 text-base sm:text-sm`}
+                      className={`${SELETOR} w-[4.5rem] px-2`}
                     >
                       {/* Cadastro atual, não a cópia guardada no rascunho: um
                           rascunho antigo não conhece as unidades novas do item. */}
@@ -677,15 +626,6 @@ export default function NovaRequisicao() {
                         <option key={u} value={u}>{u}</option>
                       ))}
                     </select>
-                    <button
-                      type="button"
-                      onClick={() => handleRemoverItem(idx)}
-                      aria-label={`Remover ${nome}`}
-                      title="Remover do pedido"
-                      className="ml-auto sm:ml-2 h-12 w-12 shrink-0 rounded-xl border border-slate-200 bg-white text-slate-500 flex items-center justify-center hover:text-red-600 hover:border-red-200 hover:bg-red-50 touch-manipulation"
-                    >
-                      <Trash2 className="h-5 w-5" />
-                    </button>
                   </div>
                 </div>
               );
@@ -697,7 +637,7 @@ export default function NovaRequisicao() {
       {/* Enviar: sempre à mão, preso no pé da tela. Some enquanto busca, para
           não ficar flutuando em cima do teclado. */}
       {total > 0 && !painelAberto && (
-        <div className="sticky bottom-3 z-20 flex items-center gap-3 rounded-2xl border border-slate-200 bg-white p-2 pl-4 shadow-lg shadow-slate-300/50">
+        <div className="sticky bottom-3 z-20 flex items-center gap-3 rounded-xl border border-slate-200 bg-white p-1.5 pl-4 shadow-md">
           <p className="flex-1 min-w-0 text-sm font-bold text-slate-700 whitespace-nowrap">
             {total} {total === 1 ? "item" : "itens"}
             <span className="font-medium text-slate-500 max-[359px]:hidden"> no pedido</span>
@@ -705,14 +645,12 @@ export default function NovaRequisicao() {
           <Button
             onClick={handleSubmit}
             disabled={loading}
-            className="h-12 px-5 rounded-xl bg-teal-600 hover:bg-teal-700 text-white text-base font-black shadow-none"
+            className={`${BOTAO_PRIMARIO} shadow-none`}
           >
-            <Send className="h-5 w-5" />
+            <Send className="h-4 w-4" />
             {loading
               ? (isEditMode ? "Salvando..." : "Enviando...")
-              : isEditMode
-                ? "Salvar alterações"
-                : ehSolicitante ? "Enviar pedido" : "Enviar requisição"}
+              : (isEditMode ? "Salvar alterações" : "Enviar requisição")}
           </Button>
         </div>
       )}

@@ -2,11 +2,11 @@ import React, { useState, Suspense, lazy } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { Link } from "react-router-dom";
 import { format } from "date-fns";
-import { FileText, ChevronRight, HelpCircle, PauseCircle, Plus } from "lucide-react";
-import { EtiquetaStatus } from "@/components/StatusSimples";
-import { situacaoParaSolicitante } from "@/lib/statusSolicitante";
+import { ptBR } from "date-fns/locale";
+import { ChevronRight, HelpCircle, Plus } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { RequisicaoCard, CabecalhoDaTabela } from "@/components/RequisicaoCard";
 import { primeiroNome, saudacao } from "@/lib/saudacao";
-import { TITULO } from "@/lib/estilos";
 import { useBloqueio } from "@/contexts/BloqueioContext";
 import { useRequisicoesSync } from "@/hooks/useRequisicoesSync";
 import { Requisicao } from "@/types";
@@ -14,6 +14,9 @@ import { Requisicao } from "@/types";
 // Só o almoxarifado vê este painel. Carregando sob demanda, o solicitante não
 // baixa a biblioteca de gráficos (recharts) nem a de PDF só para abrir o app.
 const DashboardAlmoxarifado = lazy(() => import("./requisicoes/DashboardAlmoxarifado"));
+
+/** O que ainda não chegou ao setor. */
+const EM_ANDAMENTO: Requisicao["status"][] = ["PENDENTE", "SEPARANDO", "AGUARDANDO"];
 
 export default function Dashboard() {
   const { user } = useAuth();
@@ -25,95 +28,66 @@ export default function Dashboard() {
 
   if (!user) return null;
 
-  // Tela inicial do solicitante. Uma ação principal, grande e no alto (o que se
-  // faz quase sempre); logo abaixo, a resposta para "e o meu pedido?" sem
-  // precisar abrir outra tela; o resto, discreto.
+  // Tela inicial do solicitante. Nada de visual próprio: o cabeçalho é o
+  // cartão do painel do almoxarifado, o botão é o "Nova" da tela Requisições
+  // e a lista usa o mesmo cartão (RequisicaoCard) daquela tela.
   if (user.perfil === "SOLICITANTE") {
     const emAndamento = reqs
-      .filter((r) => situacaoParaSolicitante(r.status).emAndamento)
+      .filter((r) => EM_ANDAMENTO.includes(r.status))
       .sort((a, b) => b.created_at.localeCompare(a.created_at));
     return (
-      <div className="max-w-md mx-auto space-y-6 pt-1 sm:pt-6">
-        <div>
-          <p className="text-sm font-semibold text-slate-500">{saudacao(new Date())},</p>
-          <h1 className={TITULO}>{primeiroNome(user.nome) || "Bem-vindo"}</h1>
+      <div className="max-w-4xl mx-auto space-y-4">
+        <div className="rounded-xl bg-teal-900 text-white shadow-sm p-3 space-y-3">
+          <div className="min-w-0">
+            <p className="text-xs font-semibold text-teal-100/90 leading-tight">{saudacao(new Date())},</p>
+            <h1 className="text-base sm:text-lg font-black leading-tight tracking-tight break-words">
+              {primeiroNome(user.nome) || "Bem-vindo"}
+            </h1>
+            <p className="text-xs text-teal-100/90 leading-tight mt-1 first-letter:uppercase tabular-nums">
+              {format(new Date(), "EEE, dd/MM", { locale: ptBR })} · {user.departamento}
+            </p>
+          </div>
+          {/* Pausa para inventário: o aviso fica no lugar do botão. */}
+          {bloqueio.ativo ? (
+            <p className="text-xs font-bold text-amber-200 leading-tight">
+              Requisições pausadas · {bloqueio.motivo || "inventário em andamento"}
+            </p>
+          ) : (
+            <Link to="/requisicoes/nova" className="block">
+              <Button className="w-full h-11 bg-white text-teal-900 hover:bg-teal-50 font-bold">
+                <Plus className="h-4 w-4 mr-1.5" /> Nova Requisição
+              </Button>
+            </Link>
+          )}
         </div>
 
-        {/* Pausa para inventário: o lugar do botão continua, mas diz por quê
-            não dá — sumir com ele confundiria quem usa todo dia. */}
-        {bloqueio.ativo ? (
-          <div className="flex items-center gap-4 rounded-2xl border-2 border-amber-200 bg-amber-50 p-5">
-            <span className="h-14 w-14 shrink-0 rounded-2xl bg-amber-100 text-amber-700 flex items-center justify-center">
-              <PauseCircle className="h-8 w-8" />
-            </span>
-            <span className="min-w-0">
-              <span className="block text-lg font-black text-amber-950">Pedidos pausados</span>
-              <span className="block text-sm font-medium text-amber-900">
-                {bloqueio.motivo || "Inventário em andamento"}. Volta assim que o almoxarifado liberar.
-              </span>
-            </span>
-          </div>
-        ) : (
-          <Link
-            to="/requisicoes/nova"
-            className="group flex items-center gap-4 rounded-2xl bg-teal-600 p-5 text-white shadow-lg shadow-teal-900/15 hover:bg-teal-700 active:scale-[0.99] transition"
-          >
-            <span className="h-14 w-14 shrink-0 rounded-2xl bg-white/15 flex items-center justify-center">
-              <Plus className="h-8 w-8" strokeWidth={2.5} />
-            </span>
-            <span className="min-w-0 flex-1">
-              <span className="block text-xl font-black leading-tight">Fazer um pedido</span>
-              <span className="block text-sm font-medium text-teal-50">Pedir materiais ao almoxarifado</span>
-            </span>
-            <ChevronRight className="h-6 w-6 shrink-0 text-teal-100 group-hover:translate-x-0.5 transition" />
-          </Link>
-        )}
-
-        {/* "E o meu pedido?" respondido aqui mesmo. */}
+        {/* "E o meu pedido?" respondido aqui, com o título e o "Ver todas ›"
+            da fila do painel do almoxarifado. */}
         <section className="space-y-2">
-          <h2 className="flex items-baseline gap-1.5 px-1 text-xs font-black uppercase tracking-wider text-slate-600">
-            Em andamento
-            {emAndamento.length > 0 && <span className="font-semibold text-slate-400">· {emAndamento.length}</span>}
-          </h2>
+          <div className="flex items-start justify-between gap-3 px-1">
+            <h2 className="text-base font-bold text-slate-800">
+              Em andamento <span className="font-medium text-slate-500">· {emAndamento.length}</span>
+            </h2>
+            <Link to="/requisicoes" className="shrink-0 text-xs font-bold text-teal-700 hover:underline flex items-center mt-1">
+              Ver todas <ChevronRight className="h-3.5 w-3.5" />
+            </Link>
+          </div>
           {loading ? (
-            <div className="h-20 rounded-2xl bg-slate-100 animate-pulse" />
+            <div className="h-20 rounded-xl bg-slate-100 animate-pulse" />
           ) : emAndamento.length === 0 ? (
-            <div className="rounded-2xl border border-dashed border-slate-200 bg-white px-4 py-6 text-center text-sm font-medium text-slate-500">
-              Nenhum pedido em andamento.
+            <div className="rounded-xl border border-slate-200 bg-white px-4 py-6 text-center text-sm font-semibold text-slate-500">
+              Nenhuma requisição em andamento.
             </div>
           ) : (
-            <div className="rounded-2xl border border-slate-200 bg-white shadow-lg shadow-slate-200/50 divide-y divide-slate-100 overflow-hidden">
-              {emAndamento.slice(0, 5).map((r) => {
-                const qtd = r.itens?.length ?? 0;
-                return (
-                  <Link
-                    key={r.id}
-                    to={`/requisicoes/${r.id}`}
-                    className="flex items-center gap-3 px-4 py-3.5 min-h-16 hover:bg-slate-50 active:bg-slate-100"
-                  >
-                    <span className="min-w-0 flex-1">
-                      <span className="block text-base font-bold text-slate-900">Pedido #{r.codigo_requisicao ?? "—"}</span>
-                      <span className="block text-xs font-medium text-slate-500 tabular-nums">
-                        {qtd > 0 && `${qtd} ${qtd === 1 ? "item" : "itens"} · `}
-                        {format(new Date(r.created_at), "dd/MM HH:mm")}
-                      </span>
-                    </span>
-                    <EtiquetaStatus status={r.status} />
-                    <ChevronRight className="h-5 w-5 shrink-0 text-slate-300" />
-                  </Link>
-                );
-              })}
+            <div className="grid gap-2 lg:gap-0 lg:bg-white lg:rounded-xl lg:border lg:border-slate-200 lg:shadow-lg lg:shadow-slate-200/50 lg:overflow-hidden lg:divide-y lg:divide-slate-100">
+              <CabecalhoDaTabela />
+              {emAndamento.slice(0, 5).map((r) => (
+                <RequisicaoCard key={r.id} req={r} />
+              ))}
             </div>
           )}
-          <Link
-            to="/requisicoes"
-            className="flex items-center justify-center gap-2 h-12 rounded-xl border border-slate-200 bg-white text-sm font-bold text-slate-700 hover:bg-slate-50"
-          >
-            <FileText className="h-4 w-4" /> Ver todos os meus pedidos
-          </Link>
         </section>
 
-        {/* Discreto de propósito: o menu do avatar leva ao mesmo lugar. */}
         <Link
           to="/ajuda"
           className="mx-auto flex w-fit items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold text-teal-800 hover:bg-teal-50"

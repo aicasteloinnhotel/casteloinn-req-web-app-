@@ -43,6 +43,18 @@ export const ROTULO_TIPO: Record<TipoMudanca, string> = {
 
 export const VERSOES: Versao[] = [
   {
+    versao: "1.13.1",
+    data: "25/11/2026",
+    titulo: "Visual de sempre",
+    mudancas: [
+      {
+        tipo: "correcao",
+        texto:
+          "As telas de quem pede voltaram ao visual do app: a mesma lista, os mesmos status e os mesmos botões do almoxarifado. A janela de unidade e quantidade continua.",
+      },
+    ],
+  },
+  {
     versao: "1.13",
     data: "25/11/2026",
     titulo: "Pedir ficou mais fácil",
@@ -50,17 +62,17 @@ export const VERSOES: Versao[] = [
       {
         tipo: "melhoria",
         texto:
-          "Tela inicial nova: o botão “Fazer um pedido” e, logo abaixo, como estão os seus pedidos (Enviado, Separando, Entregue).",
+          "Tela inicial: “Nova Requisição” no alto e, logo abaixo, as suas requisições em andamento.",
       },
       {
         tipo: "melhoria",
         texto:
-          "Ao tocar no material, sobe uma janela com um passo de cada vez: a unidade, a quantidade e um botão que diz o que vai entrar (“Adicionar 2 caixas”). Tirou sem querer? “Desfazer”.",
+          "Ao tocar no material, abre uma janela para escolher a unidade e a quantidade, com um botão que diz o que vai entrar (“Adicionar 2 caixas”). Tirou um item sem querer? “Desfazer”.",
       },
       {
         tipo: "melhoria",
         texto:
-          "No pedido aberto, o andamento aparece numa linha (Enviado → Separando → Entregue). “Editar pedido” ficou grande, e “Cancelar” separado e com confirmação.",
+          "Na requisição aberta, “Editar Requisição” e “Cancelar Pedido” ficaram grandes e separados, no fim da tela.",
       },
     ],
   },
