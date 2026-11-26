@@ -43,6 +43,19 @@ export const ROTULO_TIPO: Record<TipoMudanca, string> = {
 
 export const VERSOES: Versao[] = [
   {
+    versao: "1.14",
+    data: "26/11/2026",
+    titulo: "Devolução de vários itens de uma vez",
+    mudancas: [
+      {
+        tipo: "novo",
+        publico: "almoxarifado",
+        texto:
+          "“Registrar devolução” agora mostra todos os itens: preencha só o que voltou e confirme uma vez. Para eventos (bebidas do churrasco), a coluna “Lança” mostra na hora o que foi consumido, e é só isso que vai para o TOTVS.",
+      },
+    ],
+  },
+  {
     versao: "1.13.1",
     data: "25/11/2026",
     titulo: "Visual de sempre",

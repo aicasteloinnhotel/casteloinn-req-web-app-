@@ -30,6 +30,7 @@ import { ObservacaoDestaque } from "@/components/ObservacaoDestaque";
 import { playSound } from "@/lib/sounds";
 import { imprimirPdf } from "@/lib/imprimir";
 import { textoDaObservacao } from "@/lib/observacao";
+import { calcularVolta } from "@/lib/devolucaoEmLote";
 import { Requisicao, Historico, Devolucao } from "@/types";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
@@ -102,16 +103,10 @@ const ROTULOS_HISTORICO: Record<string, string> = {
   OBSERVACAO_EDITADA: "OBSERVAÇÃO EDITADA",
 };
 
-/** "1,2" ou "1.2" → 1.2. No celular a vírgula é o que se digita. */
-const lerQuantidade = (texto: string): number => {
-  const t = texto.trim();
-  if (!t) return NaN;
-  return Number(t.includes(",") ? t.replace(/\./g, "").replace(",", ".") : t);
-};
-
 /** Motivos que mais se repetem: um toque preenche, e dá para editar depois. */
 // Sem travessão: o motivo vai para o PDF, e a fonte padrão dele não tem o "—".
 const MOTIVOS_DEVOLUCAO = [
+  "Volta do evento",
   "Excesso, recolhido no setor",
   "Entregue errado",
   "Avaria ou não serviu",
@@ -757,35 +752,45 @@ export default function DetalheRequisicao() {
 
   // Devolução ao almoxarifado: mandou a mais e buscou de volta no setor.
   const [showDevolucao, setShowDevolucao] = React.useState(false);
-  const [devLinhaId, setDevLinhaId] = React.useState("");
-  const [devQtd, setDevQtd] = React.useState("");
+  // Quanto voltou de cada linha (texto digitado), todas de uma vez: na volta
+  // de um evento são dezenas de bebidas, e uma janela por item era gambiarra.
+  const [devVoltou, setDevVoltou] = React.useState<Record<string, string>>({});
   const [devMotivo, setDevMotivo] = React.useState("");
   const [desfazendo, setDesfazendo] = React.useState<Devolucao | null>(null);
 
   const abrirDevolucao = () => {
-    // Um item só para devolver: já vem escolhido.
-    const candidatas = (req?.itens || []).filter((l) => quantidadeQueSaiu(l) > 0);
-    setDevLinhaId(candidatas.length === 1 ? candidatas[0].id : "");
-    setDevQtd("");
+    setDevVoltou({});
     setDevMotivo("");
     setShowDevolucao(true);
   };
 
-  const handleRegistrarDevolucao = async () => {
-    if (!req || !user) return;
-    const qtd = lerQuantidade(devQtd);
+  const handleRegistrarDevolucao = async (aRegistrar: { id: string; quantidade: number }[]) => {
+    if (!req || !user || aRegistrar.length === 0) return;
     setUpdating(true);
+    let feitas = 0;
     try {
-      await registrarDevolucao(user.id, devLinhaId, qtd, devMotivo);
-      const linha = req.itens?.find((l) => l.id === devLinhaId);
+      // Uma de cada vez: cada devolução é conferida no banco (AJUSTE_06). Se
+      // uma falhar, as anteriores ficam e a mensagem diz quantas entraram.
+      for (const d of aRegistrar) {
+        await registrarDevolucao(user.id, d.id, d.quantidade, devMotivo);
+        feitas++;
+      }
       toast.success(
-        `Devolução registrada: ${formatarQtd(qtd)} ${linha ? unidadeEntregue(linha) : ""} de ${formatItemName(linha?.item?.nome)}.`,
+        feitas === 1
+          ? "Devolução registrada."
+          : `${feitas} devoluções registradas. O lançamento já mostra só o que ficou.`,
       );
       setShowDevolucao(false);
-      await carregarDetalhes(req.id);
     } catch (e: any) {
-      toast.error(e?.message || "Não foi possível registrar a devolução.");
+      const motivo = e?.message || "Não foi possível registrar a devolução.";
+      toast.error(feitas > 0 ? `${feitas} de ${aRegistrar.length} registradas. Parou em: ${motivo}` : motivo);
+      // As que entraram saem da janela: dá para corrigir e tentar o resto.
+      if (feitas > 0) {
+        const entraram = new Set(aRegistrar.slice(0, feitas).map((d) => d.id));
+        setDevVoltou((v) => Object.fromEntries(Object.entries(v).filter(([id]) => !entraram.has(id))));
+      }
     } finally {
+      await carregarDetalhes(req.id);
       setUpdating(false);
     }
   };
@@ -964,11 +969,21 @@ export default function DetalheRequisicao() {
   // Adicionar item depois da entrega: mesma janela da devolução (entregue e
   // ainda não lançada), mesmo sem linha para devolver.
   const podeAdicionarItem = ehAlmoxarifado && precisaLancar(req.status) && !req.lancado;
-  const linhaDevolucao = req.itens?.find((l) => l.id === devLinhaId);
-  const maxDevolucao = linhaDevolucao ? quantidadeQueSaiu(linhaDevolucao) : 0;
-  const qtdDevolucao = lerQuantidade(devQtd);
-  const devolucaoValida =
-    !!linhaDevolucao && qtdDevolucao > 0 && qtdDevolucao <= maxDevolucao && devMotivo.trim().length >= 3;
+  const volta = calcularVolta(
+    linhasDevolviveis.map((l) => ({ id: l.id, saiu: quantidadeQueSaiu(l) })),
+    devVoltou,
+  );
+  const devolucaoValida = volta.valido && devMotivo.trim().length >= 3;
+  // Enter num campo de "Voltou" vai para o próximo: conta-se a caixa de
+  // bebidas de cima para baixo, sem tirar a mão do teclado.
+  const proximoCampoDaVolta = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key !== "Enter") return;
+    e.preventDefault();
+    const campos = Array.from(document.querySelectorAll<HTMLInputElement>("input[data-volta]"));
+    const i = campos.indexOf(e.currentTarget);
+    if (i >= 0 && i < campos.length - 1) campos[i + 1].focus();
+    else document.getElementById("dev-motivo")?.focus();
+  };
 
   return (
     <div className="space-y-6 max-w-3xl mx-auto pb-10 print:p-0 print:max-w-none">
@@ -1502,67 +1517,78 @@ export default function DetalheRequisicao() {
       )}
 
       {/* Registrar devolução ao almoxarifado */}
-      <Dialog open={showDevolucao} onOpenChange={setShowDevolucao}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader className="pr-8">
+      <Dialog open={showDevolucao} onOpenChange={(a) => { if (!updating) setShowDevolucao(a); }}>
+        <DialogContent className="sm:max-w-lg w-[94vw] max-h-[90vh] p-0 flex flex-col overflow-hidden">
+          <DialogHeader className="p-4 border-b bg-slate-50 shrink-0 pr-10">
             <DialogTitle className="flex items-center gap-2 text-violet-900 font-bold">
               <PackageMinus className="h-5 w-5 shrink-0" /> Registrar devolução
             </DialogTitle>
             <DialogDescription>
-              REQ #{req.codigo_requisicao}
+              REQ #{req.codigo_requisicao} · preencha só o que voltou
             </DialogDescription>
           </DialogHeader>
 
-          <div className="space-y-4">
-            <div>
-              <label htmlFor="dev-item" className="text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1 block">
-                Item
-              </label>
-              <select
-                id="dev-item"
-                value={devLinhaId}
-                onChange={(e) => setDevLinhaId(e.target.value)}
-                className="w-full h-11 rounded-lg border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-violet-500"
-              >
-                <option value="" disabled>Escolha o item...</option>
-                {linhasDevolviveis.map((l) => (
-                  <option key={l.id} value={l.id}>
-                    {formatItemName(l.item?.nome)} — saiu {formatarQtd(quantidadeQueSaiu(l))} {unidadeEntregue(l)}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div>
-              <label htmlFor="dev-qtd" className="text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1 block">
-                Quanto voltou
-              </label>
-              <div className="flex items-center gap-2 flex-wrap">
-                {/* Texto com teclado numérico: aceita "1,2", que é o que se
-                    digita no celular (o campo numérico do navegador recusa). */}
-                <input
-                  id="dev-qtd"
-                  type="text"
-                  inputMode="decimal"
-                  autoComplete="off"
-                  value={devQtd}
-                  onChange={(e) => setDevQtd(e.target.value.replace(/[^\d.,]/g, ""))}
-                  placeholder="0"
-                  disabled={!linhaDevolucao}
-                  className="h-11 w-28 rounded-lg border border-slate-300 bg-white px-3 text-lg font-black text-center text-slate-800 focus:outline-none focus:ring-2 focus:ring-violet-500 disabled:bg-slate-50"
-                />
-                <span className="text-base font-bold text-slate-700">
-                  {linhaDevolucao ? unidadeEntregue(linhaDevolucao) : ""}
-                </span>
-                {linhaDevolucao && (
-                  <span className="text-xs text-slate-500">máximo {formatarQtd(maxDevolucao)}</span>
-                )}
+          <div className="p-4 overflow-y-auto flex-1 space-y-4">
+            {/* Todos os itens de uma vez: saiu, quanto voltou e o que fica para
+                lançar, calculado na hora. Em branco = não voltou nada. */}
+            <div className="rounded-lg border border-slate-200 bg-white overflow-hidden">
+              <div className="grid grid-cols-[minmax(0,1fr)_4.5rem_3.75rem] items-center gap-2 bg-slate-50 px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                <span>Item · saiu</span>
+                <span className="text-center">Voltou</span>
+                <span className="text-right">Lança</span>
               </div>
-              {linhaDevolucao && qtdDevolucao > maxDevolucao && (
-                <p className="text-xs font-semibold text-red-700 mt-1">
-                  Voltou mais do que saiu: o máximo é {formatarQtd(maxDevolucao)} {unidadeEntregue(linhaDevolucao)}.
-                </p>
-              )}
+              <ul className="divide-y divide-slate-100">
+                {linhasDevolviveis.map((l) => {
+                  const r = volta.linhas.find((x) => x.id === l.id);
+                  const und = unidadeEntregue(l);
+                  const mexeu = !!r && r.voltou > 0 && !r.erro;
+                  return (
+                    <li
+                      key={l.id}
+                      className={`grid grid-cols-[minmax(0,1fr)_4.5rem_3.75rem] items-center gap-2 px-3 py-2 ${mexeu ? "bg-violet-50/60" : ""}`}
+                    >
+                      <label htmlFor={`volta-${l.id}`} className="min-w-0">
+                        <span className="block text-sm font-bold text-slate-800 [overflow-wrap:anywhere]">
+                          {formatItemName(l.item?.nome)}
+                        </span>
+                        <span className="block text-xs text-slate-500 tabular-nums">
+                          saiu {formatarQtd(quantidadeQueSaiu(l))} {und}
+                        </span>
+                        {r?.erro && (
+                          <span className="block text-xs font-semibold text-red-700">
+                            {r.erro.startsWith("Máximo") ? `Voltou mais do que saiu (máx. ${formatarQtd(r.saiu)})` : r.erro}
+                          </span>
+                        )}
+                      </label>
+                      {/* Texto com teclado numérico: aceita "1,2", que é o que
+                          se digita no celular. */}
+                      <input
+                        id={`volta-${l.id}`}
+                        data-volta
+                        type="text"
+                        inputMode="decimal"
+                        enterKeyHint="next"
+                        autoComplete="off"
+                        value={devVoltou[l.id] ?? ""}
+                        onChange={(e) => {
+                          const v = e.target.value.replace(/[^\d.,]/g, "");
+                          setDevVoltou((atual) => ({ ...atual, [l.id]: v }));
+                        }}
+                        onKeyDown={proximoCampoDaVolta}
+                        onFocus={(e) => e.target.select()}
+                        placeholder="0"
+                        aria-label={`Quanto voltou de ${formatItemName(l.item?.nome)}`}
+                        className={`h-11 w-full rounded-lg border bg-white px-2 text-base font-black text-center text-slate-800 focus:outline-none focus:ring-2 tabular-nums ${
+                          r?.erro ? "border-red-400 focus:ring-red-400" : "border-slate-300 focus:ring-violet-500"
+                        }`}
+                      />
+                      <span className={`text-right text-sm tabular-nums ${mexeu ? "font-black text-violet-900" : "font-semibold text-slate-400"}`}>
+                        {formatarQtd(r?.lanca ?? quantidadeQueSaiu(l))}
+                      </span>
+                    </li>
+                  );
+                })}
+              </ul>
             </div>
 
             <div>
@@ -1594,26 +1620,19 @@ export default function DetalheRequisicao() {
                 className="w-full rounded-lg border border-slate-300 bg-white p-2.5 text-sm text-slate-800 resize-none focus:outline-none focus:ring-2 focus:ring-violet-500"
               />
             </div>
-
-            {linhaDevolucao && qtdDevolucao > 0 && qtdDevolucao <= maxDevolucao && (
-              <p className="text-xs text-violet-900 bg-violet-50 border border-violet-200 rounded-lg p-2.5">
-                Entregue {formatarQtd(linhaDevolucao.quantidade_separada)} {unidadeEntregue(linhaDevolucao)}
-                {quantidadeDevolvida(linhaDevolucao) > 0 && <>, já voltou {formatarQtd(quantidadeDevolvida(linhaDevolucao))}</>}
-                , volta agora {formatarQtd(qtdDevolucao)} → saída de{" "}
-                <strong>
-                  {formatarQtd(Math.round((maxDevolucao - qtdDevolucao) * 1000) / 1000)} {unidadeEntregue(linhaDevolucao)}
-                </strong>
-                . É o que vai para o TOTVS.
-              </p>
-            )}
           </div>
 
-          <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-2 pt-2">
-            <Button variant="outline" onClick={() => setShowDevolucao(false)} className="font-bold h-11">
+          <div className="p-4 border-t bg-white shrink-0 flex flex-col-reverse sm:flex-row sm:items-center sm:justify-end gap-2">
+            {volta.aRegistrar.length > 0 && (
+              <p className="order-last sm:order-first text-xs font-semibold text-slate-600 sm:mr-auto text-center sm:text-left">
+                {volta.aRegistrar.length} {volta.aRegistrar.length === 1 ? "item voltou" : "itens voltaram"} · o TOTVS recebe a coluna "Lança"
+              </p>
+            )}
+            <Button variant="outline" onClick={() => setShowDevolucao(false)} disabled={updating} className="font-bold h-11">
               Cancelar
             </Button>
             <Button
-              onClick={handleRegistrarDevolucao}
+              onClick={() => handleRegistrarDevolucao(volta.aRegistrar)}
               disabled={!devolucaoValida || updating}
               className="font-bold h-11 bg-violet-700 hover:bg-violet-800 text-white"
             >

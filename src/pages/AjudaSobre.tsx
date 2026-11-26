@@ -507,7 +507,15 @@ export default function AjudaSobre() {
                 <Topico icone={<PackageMinus />} titulo="Devolução e item a mais depois da entrega">
                   <p>
                     Entregou a mais e buscou de volta no setor? Abra a requisição entregue e toque em{" "}
-                    <strong>Registrar devolução</strong>: escolha o item, quanto voltou e o motivo.
+                    <strong>Registrar devolução</strong>: aparecem todos os itens; preencha só o que
+                    voltou (o resto fica em branco), escolha o motivo e confirme uma vez.
+                  </p>
+                  <p>
+                    <strong>Evento (churrasco, bebidas):</strong> faça a requisição normal com tudo que
+                    vai. Na volta, abra-a, toque em <strong>Registrar devolução</strong>, digite quanto
+                    voltou de cada bebida (Enter passa para a próxima) e use o motivo{" "}
+                    <strong>Volta do evento</strong>. A coluna <strong>Lança</strong> mostra na hora o
+                    que foi consumido, e é só isso que vai para o TOTVS.
                   </p>
                   <p>
                     O entregue (o que foi assinado) continua registrado, e o que voltou aparece
