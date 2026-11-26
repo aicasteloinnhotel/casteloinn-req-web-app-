@@ -24,6 +24,8 @@ const CotacaoReposicao = lazy(() => import('./pages/requisicoes/CotacaoReposicao
 const Usuarios = lazy(() => import('./pages/admin/Usuarios'));
 const Itens = lazy(() => import('./pages/admin/Itens'));
 const AjudaSobre = lazy(() => import('./pages/AjudaSobre'));
+const ListaChurrascos = lazy(() => import('./pages/churrasco/ListaChurrascos'));
+const NovoChurrasco = lazy(() => import('./pages/churrasco/NovoChurrasco'));
 
 const CarregandoTela = () => (
   <div className="flex items-center justify-center py-20 text-slate-600 font-medium">
@@ -85,6 +87,8 @@ export default function App() {
               <Route path="/requisicoes/:id/separacao" element={<Suspense fallback={<CarregandoTela />}><Separacao /></Suspense>} />
               <Route path="/reposicao" element={<Suspense fallback={<CarregandoTela />}><ListaReposicao /></Suspense>} />
               <Route path="/reposicao/cotacao/:lote" element={<Suspense fallback={<CarregandoTela />}><CotacaoReposicao /></Suspense>} />
+              <Route path="/churrascos" element={<Suspense fallback={<CarregandoTela />}><ListaChurrascos /></Suspense>} />
+              <Route path="/churrascos/novo" element={<Suspense fallback={<CarregandoTela />}><NovoChurrasco /></Suspense>} />
               <Route path="/admin/usuarios" element={<Suspense fallback={<CarregandoTela />}><Usuarios /></Suspense>} />
               <Route path="/admin/itens" element={<Suspense fallback={<CarregandoTela />}><Itens /></Suspense>} />
             </Route>

@@ -28,6 +28,7 @@ import {
   Eye,
   PauseCircle,
   PackageMinus,
+  Flame,
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useInstallApp } from "@/hooks/useInstallApp";
@@ -504,18 +505,46 @@ export default function AjudaSobre() {
                   </p>
                 </Topico>
 
+                <Topico icone={<Flame />} titulo="Churrasco">
+                  <Passos>
+                    <li>
+                      No menu, <strong>Churrascos</strong> → <strong>Novo</strong>: empresa, data, horário, PAX e
+                      tipo. O app sugere quanto de carne levar (0,5 kg por PAX no pequeno, 0,47 kg no grande).
+                    </li>
+                    <li>
+                      A ficha já vem com os itens de sempre. Preencha a quantidade de cada um (o que ficar em
+                      branco não vai). Cada churrasco é de um jeito: tire o que não vai usar na{" "}
+                      <strong>lixeira</strong> e inclua o que faltar na busca <strong>Adicionar…</strong> de cada
+                      grupo. Toque em <strong>Criar churrasco</strong>: vira uma requisição do setor Eventos.
+                    </li>
+                    <li>
+                      <strong>Separação</strong> normal: o peso real é o separado. O gerente confere os itens e
+                      assina como quem recebe.
+                    </li>
+                    <li>
+                      Na requisição aparece a <strong>ficha do churrasco</strong>, com as tarefas de antes e
+                      depois do evento para marcar.
+                    </li>
+                    <li>
+                      Depois do evento: <strong>Contar a volta das bebidas</strong>. Só as bebidas voltam;
+                      carnes, hortifruti e outros são consumidos. Em branco = não voltou nada.
+                    </li>
+                    <li>
+                      Só então o <strong>Lançar</strong> libera, e vai para o TOTVS só o consumido. Contou
+                      errado? <strong>Reabrir contagem</strong> (antes de lançar).
+                    </li>
+                  </Passos>
+                  <p>
+                    Em <strong>Churrascos</strong> fica o histórico, com a média real de carne por PAX. Material
+                    que não aparece na busca precisa ser cadastrado antes em Controle de Itens.
+                  </p>
+                </Topico>
+
                 <Topico icone={<PackageMinus />} titulo="Devolução e item a mais depois da entrega">
                   <p>
                     Entregou a mais e buscou de volta no setor? Abra a requisição entregue e toque em{" "}
                     <strong>Registrar devolução</strong>: aparecem todos os itens; preencha só o que
                     voltou (o resto fica em branco), escolha o motivo e confirme uma vez.
-                  </p>
-                  <p>
-                    <strong>Evento (churrasco, bebidas):</strong> faça a requisição normal com tudo que
-                    vai. Na volta, abra-a, toque em <strong>Registrar devolução</strong>, digite quanto
-                    voltou de cada bebida (Enter passa para a próxima) e use o motivo{" "}
-                    <strong>Volta do evento</strong>. A coluna <strong>Lança</strong> mostra na hora o
-                    que foi consumido, e é só isso que vai para o TOTVS.
                   </p>
                   <p>
                     O entregue (o que foi assinado) continua registrado, e o que voltou aparece

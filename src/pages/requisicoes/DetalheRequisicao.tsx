@@ -24,14 +24,18 @@ import {
   desfazerLancamento,
   getDevolucoes,
   registrarDevolucao,
-  desfazerDevolucao
+  desfazerDevolucao,
+  getChurrasco,
+  marcarVoltaChurrasco
 } from "@/services/api";
 import { ObservacaoDestaque } from "@/components/ObservacaoDestaque";
 import { playSound } from "@/lib/sounds";
 import { imprimirPdf } from "@/lib/imprimir";
 import { textoDaObservacao } from "@/lib/observacao";
 import { calcularVolta } from "@/lib/devolucaoEmLote";
-import { Requisicao, Historico, Devolucao } from "@/types";
+import { FichaChurrasco } from "@/components/FichaChurrasco";
+import { etapaDoChurrasco, grupoDoItem } from "@/lib/churrasco";
+import { Requisicao, Historico, Devolucao, Churrasco } from "@/types";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 
@@ -101,6 +105,8 @@ const ROTULOS_HISTORICO: Record<string, string> = {
   DEVOLUCAO_DESFEITA: "DEVOLUÇÃO DESFEITA",
   ITEM_INCLUIDO_APOS_ENTREGA: "ITEM ADICIONADO DEPOIS DA ENTREGA",
   OBSERVACAO_EDITADA: "OBSERVAÇÃO EDITADA",
+  CHURRASCO_VOLTA_CONTADA: "VOLTA DAS BEBIDAS CONTADA",
+  CHURRASCO_VOLTA_REABERTA: "CONTAGEM DA VOLTA REABERTA",
 };
 
 /** Motivos que mais se repetem: um toque preenche, e dá para editar depois. */
@@ -155,6 +161,8 @@ export default function DetalheRequisicao() {
   const [req, setReq] = useState<Requisicao | null>(null);
   const [historico, setHistorico] = useState<Historico[]>([]);
   const [devolucoes, setDevolucoes] = useState<Devolucao[]>([]);
+  // Churrasco (AJUSTE_11): a ficha do evento, quando esta requisição é um.
+  const [churrasco, setChurrasco] = useState<Churrasco | null>(null);
   const [loading, setLoading] = useState(true);
   const [updating, setUpdating] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
@@ -170,6 +178,7 @@ export default function DetalheRequisicao() {
     setReq(null);
     setHistorico([]);
     setDevolucoes([]);
+    setChurrasco(null);
     setRel(null);
 
     carregarDetalhes(id);
@@ -223,9 +232,10 @@ export default function DetalheRequisicao() {
       setSignatureConferenteBase64(
         data?.assinatura_almoxarifado || location.state?.assinaturaAlmoxarifado || null,
       );
-      const [hist, devs] = await Promise.all([getHistorico(reqId), getDevolucoes(reqId)]);
+      const [hist, devs, churr] = await Promise.all([getHistorico(reqId), getDevolucoes(reqId), getChurrasco(reqId)]);
       setHistorico(hist);
       setDevolucoes(devs);
+      setChurrasco(churr);
 
       // Vínculos: uma requisição pode ser complementar de outra E ter gerado a
       // sua própria complementar (ruptura em cima de ruptura). Antes só um dos
@@ -309,6 +319,17 @@ export default function DetalheRequisicao() {
 
   /** Entregue e ainda não lançada: a impressão espera o lançamento. */
   const aguardaLancamento = !!req && precisaLancar(req.status) && !req.lancado;
+  // Churrasco: em que passo está. Entregue e sem a volta contada, o
+  // lançamento fica travado (o banco também recusa, AJUSTE_11).
+  const etapaChurrasco = req && churrasco ? etapaDoChurrasco(req.status, req.lancado, churrasco.volta_conferida_em) : null;
+  const aguardaVolta = etapaChurrasco === "VOLTA";
+  const abrirLancamento = () => {
+    if (aguardaVolta) {
+      toast.info("Churrasco: conte a volta das bebidas antes de lançar.");
+      return;
+    }
+    setShowLancamento(true);
+  };
 
   const handleStartSeparacao = async () => {
     if (!req || !user) return;
@@ -363,7 +384,7 @@ export default function DetalheRequisicao() {
     // Regra da operação: o comprovante só sai depois do lançamento no TOTVS.
     if (aguardaLancamento) {
       toast.info("Lance no TOTVS antes de imprimir.");
-      setShowLancamento(true);
+      abrirLancamento();
       return;
     }
     setIsExporting(true);
@@ -758,14 +779,33 @@ export default function DetalheRequisicao() {
   const [devMotivo, setDevMotivo] = React.useState("");
   const [desfazendo, setDesfazendo] = React.useState<Devolucao | null>(null);
 
-  const abrirDevolucao = () => {
+  // Volta do churrasco: a mesma janela, só com as bebidas, e no fim marca a
+  // volta como contada (libera o lançamento). Pode concluir sem nada voltar.
+  const [modoVolta, setModoVolta] = React.useState(false);
+
+  const abrirDevolucao = (volta = false) => {
     setDevVoltou({});
-    setDevMotivo("");
+    setModoVolta(volta);
+    setDevMotivo(volta ? "Volta do evento" : "");
     setShowDevolucao(true);
   };
 
+  const handleReabrirVolta = async () => {
+    if (!req || !user) return;
+    setUpdating(true);
+    try {
+      await marcarVoltaChurrasco(req.id, user.id, false);
+      toast.info("Contagem reaberta.");
+    } catch (e: any) {
+      toast.error(e?.message || "Não foi possível reabrir a contagem.");
+    } finally {
+      await carregarDetalhes(req.id);
+      setUpdating(false);
+    }
+  };
+
   const handleRegistrarDevolucao = async (aRegistrar: { id: string; quantidade: number }[]) => {
-    if (!req || !user || aRegistrar.length === 0) return;
+    if (!req || !user || (aRegistrar.length === 0 && !modoVolta)) return;
     setUpdating(true);
     let feitas = 0;
     try {
@@ -775,11 +815,20 @@ export default function DetalheRequisicao() {
         await registrarDevolucao(user.id, d.id, d.quantidade, devMotivo);
         feitas++;
       }
-      toast.success(
-        feitas === 1
-          ? "Devolução registrada."
-          : `${feitas} devoluções registradas. O lançamento já mostra só o que ficou.`,
-      );
+      if (modoVolta) {
+        await marcarVoltaChurrasco(req.id, user.id, true);
+        toast.success(
+          feitas === 0
+            ? "Volta contada: nada voltou. Já pode lançar no TOTVS."
+            : `Volta contada (${feitas} ${feitas === 1 ? "bebida voltou" : "bebidas voltaram"}). Já pode lançar no TOTVS.`,
+        );
+      } else {
+        toast.success(
+          feitas === 1
+            ? "Devolução registrada."
+            : `${feitas} devoluções registradas. O lançamento já mostra só o que ficou.`,
+        );
+      }
       setShowDevolucao(false);
     } catch (e: any) {
       const motivo = e?.message || "Não foi possível registrar a devolução.";
@@ -963,8 +1012,13 @@ export default function DetalheRequisicao() {
 
   // Devolução: só o almoxarifado, só entregue e ainda não lançada, e só se
   // ainda há o que devolver. A regra de verdade está no banco (AJUSTE_06).
-  const linhasDevolviveis = (req.itens || []).filter((l) => quantidadeQueSaiu(l) > 0);
-  const podeDevolver = ehAlmoxarifado && foiEntregue(req.status) && !req.lancado && linhasDevolviveis.length > 0;
+  // No churrasco só bebida volta: carne, hortifruti e outros são consumidos.
+  const linhasDevolviveis = (req.itens || []).filter(
+    (l) => quantidadeQueSaiu(l) > 0 && (!churrasco || grupoDoItem(churrasco.grupos, l.item_id, l.item?.nome) === "BEBIDA"),
+  );
+  // Enquanto a volta do churrasco não foi contada, a devolução é pela ficha.
+  const podeDevolver =
+    ehAlmoxarifado && foiEntregue(req.status) && !req.lancado && linhasDevolviveis.length > 0 && !aguardaVolta;
   const podeDesfazerDevolucao = ehAlmoxarifado && !req.lancado;
   // Adicionar item depois da entrega: mesma janela da devolução (entregue e
   // ainda não lançada), mesmo sem linha para devolver.
@@ -973,7 +1027,10 @@ export default function DetalheRequisicao() {
     linhasDevolviveis.map((l) => ({ id: l.id, saiu: quantidadeQueSaiu(l) })),
     devVoltou,
   );
-  const devolucaoValida = volta.valido && devMotivo.trim().length >= 3;
+  // Volta do churrasco: concluir vale mesmo sem nada voltar (tudo vendido).
+  const devolucaoValida = modoVolta
+    ? volta.comErro === 0 && (volta.aRegistrar.length === 0 || devMotivo.trim().length >= 3)
+    : volta.valido && devMotivo.trim().length >= 3;
   // Enter num campo de "Voltou" vai para o próximo: conta-se a caixa de
   // bebidas de cima para baixo, sem tirar a mão do teclado.
   const proximoCampoDaVolta = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -1051,20 +1108,26 @@ export default function DetalheRequisicao() {
             {podeLancar && (
               <button
                 type="button"
-                onClick={() => setShowLancamento(true)}
+                onClick={abrirLancamento}
                 title={
                   req.lancado
                     ? "Já lançada no TOTVS — tocar para rever ou desfazer"
-                    : "Abrir os dados para lançar no TOTVS"
+                    : aguardaVolta
+                      ? "Conte a volta das bebidas antes de lançar"
+                      : "Abrir os dados para lançar no TOTVS"
                 }
                 className={`w-full sm:w-auto flex items-center justify-center gap-2 h-9 px-4 rounded-lg text-sm font-bold border transition-colors ${
                   req.lancado
                     ? "bg-emerald-600 border-emerald-600 text-white hover:bg-emerald-700"
-                    : "bg-amber-50 border-amber-300 text-amber-800 hover:bg-amber-100"
+                    : aguardaVolta
+                      ? "border-slate-200 bg-slate-50 text-slate-400"
+                      : "bg-amber-50 border-amber-300 text-amber-800 hover:bg-amber-100"
                 }`}
               >
                 {req.lancado ? (
                   <><ClipboardCheck className="h-4 w-4" /> Lançada</>
+                ) : aguardaVolta ? (
+                  <><Lock className="h-4 w-4" /> Lançar</>
                 ) : (
                   <><ClipboardList className="h-4 w-4" /> Lançar</>
                 )}
@@ -1080,6 +1143,20 @@ export default function DetalheRequisicao() {
         observacao={req.observacao}
         aoSalvar={ehAlmoxarifado || (ehDono && req.status === "PENDENTE") ? handleSalvarObservacao : undefined}
       />
+
+      {/* Churrasco: a ficha do evento até ser lançado. Depois, requisição comum. */}
+      {churrasco && etapaChurrasco && etapaChurrasco !== "PRONTO" && etapaChurrasco !== "CANCELADO" && (
+        <FichaChurrasco
+          churrasco={churrasco}
+          req={req}
+          podeMexer={ehAlmoxarifado}
+          nomeUsuario={user?.nome || ""}
+          aoContarVolta={() => abrirDevolucao(true)}
+          aoReabrirVolta={handleReabrirVolta}
+          aoMudar={setChurrasco}
+          ocupado={updating}
+        />
+      )}
 
       {/* Vínculos: origem e/ou complementar. Podem existir os dois ao mesmo tempo. */}
       {rel && (
@@ -1127,6 +1204,10 @@ export default function DetalheRequisicao() {
                       req.lancado ? (
                         <span className="text-xs font-bold text-white bg-emerald-600 px-2 py-1 rounded-full flex items-center">
                           <ClipboardCheck className="w-3 h-3 mr-1" /> LANÇADA
+                        </span>
+                      ) : aguardaVolta ? (
+                        <span className="text-xs font-bold text-violet-800 bg-violet-100 border border-violet-200 px-2 py-1 rounded-full flex items-center">
+                          <PackageMinus className="w-3 h-3 mr-1" /> AGUARDANDO VOLTA
                         </span>
                       ) : (
                         <span className="text-xs font-bold text-amber-800 bg-amber-100 border border-amber-200 px-2 py-1 rounded-full flex items-center">
@@ -1324,7 +1405,7 @@ export default function DetalheRequisicao() {
                 <div className="flex flex-col sm:flex-row gap-2">
                   {podeDevolver && (
                     <Button
-                      onClick={abrirDevolucao}
+                      onClick={() => abrirDevolucao(false)}
                       variant="outline"
                       disabled={updating}
                       className="h-11 sm:flex-1 border-violet-300 bg-white text-violet-800 hover:bg-violet-100 hover:text-violet-900 font-bold"
@@ -1521,10 +1602,10 @@ export default function DetalheRequisicao() {
         <DialogContent className="sm:max-w-lg w-[94vw] max-h-[90vh] p-0 flex flex-col overflow-hidden">
           <DialogHeader className="p-4 border-b bg-slate-50 shrink-0 pr-10">
             <DialogTitle className="flex items-center gap-2 text-violet-900 font-bold">
-              <PackageMinus className="h-5 w-5 shrink-0" /> Registrar devolução
+              <PackageMinus className="h-5 w-5 shrink-0" /> {modoVolta ? "Volta das bebidas" : "Registrar devolução"}
             </DialogTitle>
             <DialogDescription>
-              REQ #{req.codigo_requisicao} · preencha só o que voltou
+              REQ #{req.codigo_requisicao} · {modoVolta ? "digite quanto voltou de cada bebida (em branco = nada voltou)" : "preencha só o que voltou"}
             </DialogDescription>
           </DialogHeader>
 
@@ -1623,9 +1704,11 @@ export default function DetalheRequisicao() {
           </div>
 
           <div className="p-4 border-t bg-white shrink-0 flex flex-col-reverse sm:flex-row sm:items-center sm:justify-end gap-2">
-            {volta.aRegistrar.length > 0 && (
+            {(volta.aRegistrar.length > 0 || modoVolta) && (
               <p className="order-last sm:order-first text-xs font-semibold text-slate-600 sm:mr-auto text-center sm:text-left">
-                {volta.aRegistrar.length} {volta.aRegistrar.length === 1 ? "item voltou" : "itens voltaram"} · o TOTVS recebe a coluna "Lança"
+                {volta.aRegistrar.length === 0
+                  ? "Nada voltou: tudo o que saiu será lançado"
+                  : `${volta.aRegistrar.length} ${volta.aRegistrar.length === 1 ? "item voltou" : "itens voltaram"} · o TOTVS recebe o que está em Lança`}
               </p>
             )}
             <Button variant="outline" onClick={() => setShowDevolucao(false)} disabled={updating} className="font-bold h-11">
@@ -1636,7 +1719,7 @@ export default function DetalheRequisicao() {
               disabled={!devolucaoValida || updating}
               className="font-bold h-11 bg-violet-700 hover:bg-violet-800 text-white"
             >
-              {updating ? "Registrando..." : "Registrar devolução"}
+              {updating ? "Registrando..." : modoVolta ? "Concluir volta" : "Registrar devolução"}
             </Button>
           </div>
         </DialogContent>
@@ -1969,7 +2052,10 @@ export default function DetalheRequisicao() {
                   : req.status === "AGUARDANDO"
                     ? "Entrega registrada. Ainda há itens pendentes: a requisição continua aguardando reposição."
                     : "Entrega registrada com as assinaturas."}
-                {precisaLancar(req.status) && " Quando der tempo, use o botão Lançar no topo; o Imprimir libera depois do lançamento."}
+                {precisaLancar(req.status) &&
+                  (churrasco
+                    ? " Churrasco: depois do evento, conte a volta das bebidas na ficha para liberar o lançamento."
+                    : " Quando der tempo, use o botão Lançar no topo; o Imprimir libera depois do lançamento.")}
               </DialogDescription>
             </DialogHeader>
           </div>

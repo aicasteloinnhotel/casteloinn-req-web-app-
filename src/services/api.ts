@@ -1,6 +1,6 @@
 import { supabase, hasSupabaseKeys } from "@/lib/supabase";
 import { formatItemName } from "@/lib/utils";
-import { Item, Usuario, Requisicao, RequisicaoItem, Historico, BloqueioRequisicoes, Devolucao } from "@/types";
+import { Item, Usuario, Requisicao, RequisicaoItem, Historico, BloqueioRequisicoes, Devolucao, Churrasco } from "@/types";
 
 // ====================================== //
 // ============ ITENS SERVICE =========== //
@@ -249,6 +249,124 @@ export const createRequisicao = async (
     await supabase.from("requisicoes").delete().eq("id", requisicaoId);
     throw rollbackError;
   }
+};
+
+// ====================================== //
+// ============= CHURRASCO ============== //
+// ====================================== //
+// Tabela churrascos (AJUSTE_11). Sem o ajuste, as leituras devolvem vazio e o
+// app segue funcionando; criar avisa que falta rodar o script.
+
+/** O banco já tem o churrasco? (consulta vazia, só para saber se a tabela existe) */
+export const churrascoDisponivel = async (): Promise<boolean> => {
+  if (!hasSupabaseKeys) return false;
+  const { error } = await supabase.from("churrascos").select("requisicao_id").limit(1);
+  return !error;
+};
+
+export const getChurrasco = async (requisicaoId: string): Promise<Churrasco | null> => {
+  if (!hasSupabaseKeys) return null;
+  const { data, error } = await supabase
+    .from("churrascos")
+    .select("*")
+    .eq("requisicao_id", requisicaoId)
+    .maybeSingle();
+  if (error) {
+    console.warn("Churrasco indisponível (AJUSTE_11 rodado?):", error.message);
+    return null;
+  }
+  return (data as Churrasco) || null;
+};
+
+export const getChurrascos = async (): Promise<Churrasco[]> => {
+  if (!hasSupabaseKeys) return [];
+  const { data, error } = await supabase
+    .from("churrascos")
+    .select(
+      `*,
+      requisicao:requisicoes!churrascos_requisicao_id_fkey(
+        id, codigo_requisicao, status, lancado, departamento, created_at,
+        itens:requisicao_itens!requisicao_itens_requisicao_id_fkey(*, item:itens(nome, unidade))
+      )`,
+    )
+    .order("data_evento", { ascending: false, nullsFirst: true })
+    .order("created_at", { ascending: false });
+  if (error) {
+    console.warn("Churrascos indisponíveis (AJUSTE_11 rodado?):", error.message);
+    return [];
+  }
+  return (data || []) as Churrasco[];
+};
+
+/**
+ * Cria o churrasco: a requisição (PENDENTE, setor de quem recebe) e, junto, os
+ * dados do evento. Confere antes se o banco tem a tabela: sem isso a
+ * requisição seria criada sozinha, sem a ficha.
+ */
+export const criarChurrasco = async (
+  dados: Pick<Churrasco, "empresa" | "data_evento" | "horario" | "pax" | "tipo" | "grupos" | "tarefas">,
+  dono: { id: string; departamento: string },
+  linhas: LinhaRequisicao[],
+  criadoPor: string,
+): Promise<{ id: string; codigo_requisicao?: number }> => {
+  if (!(await churrascoDisponivel())) {
+    throw new Error("O churrasco ainda não existe no banco. Rode o script AJUSTE_11 no Supabase.");
+  }
+  const criada = await createRequisicao(
+    {
+      usuario_id: dono.id,
+      departamento: dono.departamento,
+      status: "PENDENTE",
+      observacao: `Churrasco: ${dados.empresa.trim()}${dados.pax ? ` · ${dados.pax} PAX` : ""}`,
+    },
+    linhas,
+  );
+  if (!criada) throw new Error("Não foi possível criar a requisição.");
+  const { error } = await supabase.from("churrascos").insert({
+    requisicao_id: criada.id,
+    empresa: dados.empresa.trim(),
+    data_evento: dados.data_evento || null,
+    horario: dados.horario?.trim() || null,
+    pax: dados.pax ?? null,
+    tipo: dados.tipo,
+    grupos: dados.grupos,
+    tarefas: dados.tarefas,
+    criado_por: criadoPor,
+  });
+  if (error) {
+    // A requisição já existe: não apaga (consome número de REQ). Fica como
+    // requisição comum e o erro diz o que houve.
+    throw new Error(
+      `A REQ #${criada.codigo_requisicao ?? ""} foi criada, mas os dados do churrasco não foram gravados: ${error.message}`,
+    );
+  }
+  return criada;
+};
+
+export const salvarTarefasChurrasco = async (requisicaoId: string, tarefas: Churrasco["tarefas"]) => {
+  if (!hasSupabaseKeys) return;
+  const { error } = await supabase.from("churrascos").update({ tarefas }).eq("requisicao_id", requisicaoId);
+  if (error) throw error;
+};
+
+/** Volta das bebidas contada (ou reaberta, antes de lançar). Libera o lançamento. */
+export const marcarVoltaChurrasco = async (requisicaoId: string, usuarioId: string, conferida: boolean) => {
+  if (!hasSupabaseKeys) return;
+  const { error } = await supabase
+    .from("churrascos")
+    .update(
+      conferida
+        ? { volta_conferida_em: new Date().toISOString(), volta_conferida_por: usuarioId }
+        : { volta_conferida_em: null, volta_conferida_por: null },
+    )
+    .eq("requisicao_id", requisicaoId);
+  if (error) throw error;
+  await addHistorico(
+    requisicaoId,
+    conferida ? "CHURRASCO_VOLTA_CONTADA" : "CHURRASCO_VOLTA_REABERTA",
+    usuarioId,
+    conferida ? "Volta das bebidas contada. Lançamento no TOTVS liberado." : "Contagem da volta reaberta.",
+  );
 };
 
 export const updateRequisicaoStatus = async (

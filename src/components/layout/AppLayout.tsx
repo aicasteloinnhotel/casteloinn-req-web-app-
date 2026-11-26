@@ -24,6 +24,7 @@ import {
   ChevronLeft,
   ChevronRight,
   HelpCircle,
+  Flame,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Toaster } from "@/components/ui/sonner";
@@ -115,6 +116,7 @@ export default function AppLayout() {
       ? [
           { name: "Nova Requisição", href: "/requisicoes/nova", icon: PlusCircle },
           { name: "Lista de Reposição", href: "/reposicao", icon: ClipboardList },
+          { name: "Churrascos", href: "/churrascos", icon: Flame },
           { name: "Controle de Itens", href: "/admin/itens", icon: Package },
           { name: "Usuários", href: "/admin/usuarios", icon: Users },
         ]

@@ -45,13 +45,25 @@ export const VERSOES: Versao[] = [
   {
     versao: "1.14",
     data: "26/11/2026",
-    titulo: "Devolução de vários itens de uma vez",
+    titulo: "Churrasco no app",
     mudancas: [
       {
         tipo: "novo",
         publico: "almoxarifado",
         texto:
-          "“Registrar devolução” agora mostra todos os itens: preencha só o que voltou e confirme uma vez. Para eventos (bebidas do churrasco), a coluna “Lança” mostra na hora o que foi consumido, e é só isso que vai para o TOTVS.",
+          "Churrascos (menu): a ficha do churrasco no app, no lugar da planilha. Empresa, PAX e carne sugerida; vira requisição, com tarefas de antes e depois do evento.",
+      },
+      {
+        tipo: "novo",
+        publico: "almoxarifado",
+        texto:
+          "Depois do evento, conte a volta das bebidas: só então o lançamento libera, com o que foi consumido.",
+      },
+      {
+        tipo: "melhoria",
+        publico: "almoxarifado",
+        texto:
+          "“Registrar devolução” mostra todos os itens de uma vez: preencha só o que voltou e confirme uma vez.",
       },
     ],
   },

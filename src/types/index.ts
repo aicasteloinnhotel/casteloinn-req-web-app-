@@ -88,6 +88,25 @@ export interface Devolucao {
   desfeita?: { nome: string } | null;
 }
 
+/** Dados do churrasco ao lado da requisição (AJUSTE_11). */
+export interface Churrasco {
+  requisicao_id: string;
+  empresa: string;
+  data_evento?: string | null;
+  horario?: string | null;
+  pax?: number | null;
+  tipo: "PEQUENO" | "GRANDE";
+  /** item_id → CARNE | BEBIDA | HORTIFRUTI | OUTROS. Só BEBIDA volta. */
+  grupos: Record<string, string>;
+  tarefas: { fase: "ANTES" | "DEPOIS"; nome: string; feito_em?: string | null; feito_por?: string | null }[];
+  volta_conferida_em?: string | null;
+  volta_conferida_por?: string | null;
+  criado_por?: string | null;
+  created_at: string;
+  /** Na lista de churrascos: a requisição com as linhas. */
+  requisicao?: Requisicao | null;
+}
+
 /** Pausa para inventário: com ela ligada, ninguém cria requisição nova. */
 export interface BloqueioRequisicoes {
   ativo: boolean;
